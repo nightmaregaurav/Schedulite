@@ -11,7 +11,7 @@ public sealed class ExampleScheduleProvider : IBackgroundJobScheduleProvider
         [
             new()
             {
-                ScheduleId = Guid.NewGuid().ToString(),
+                ScheduleId = "tenant-1-say-hi",
                 JobId = "say-hi",
                 SubjectId = "tenant 1",
                 ScheduleRule = "every-minute",
@@ -19,7 +19,7 @@ public sealed class ExampleScheduleProvider : IBackgroundJobScheduleProvider
             },
             new()
             {
-                ScheduleId = Guid.NewGuid().ToString(),
+                ScheduleId = "tenant-1-skelly",
                 JobId = "skelly",
                 SubjectId = "tenant 1",
                 ScheduleRule = "every-2-minute",
@@ -27,7 +27,7 @@ public sealed class ExampleScheduleProvider : IBackgroundJobScheduleProvider
             },
             new()
             {
-                ScheduleId = Guid.NewGuid().ToString(),
+                ScheduleId = "tenant-2-skelly",
                 JobId = "skelly",
                 SubjectId = "tenant 2",
                 ScheduleRule = "every-3-minute",
@@ -35,7 +35,7 @@ public sealed class ExampleScheduleProvider : IBackgroundJobScheduleProvider
             },
             new()
             {
-                ScheduleId = Guid.NewGuid().ToString(),
+                ScheduleId = "tenant-3-skelly",
                 JobId = "skelly",
                 SubjectId = "tenant 3",
                 ScheduleRule = "every-4-minute",
