@@ -1,4 +1,7 @@
 using Scalar.AspNetCore;
+using Schedulite.DependencyInjection;
+using Schedulite.Example.BackgroundJobs;
+using Schedulite.Example.BackgroundJobs.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -7,6 +10,13 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Enable controllers
 builder.Services.AddControllers();
+builder.Services.AddSchedulite<ExampleScheduleProvider>(options =>
+{
+    options.MaxConcurrency = 2;
+    options.ExecutionQueueCapacity = 16;
+});
+builder.Services.AddScheduliteJob<SayHiJob>("say-hi");
+builder.Services.AddScheduliteJob<SkellyJob>("skelly");
 
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
