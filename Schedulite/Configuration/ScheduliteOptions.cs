@@ -1,4 +1,4 @@
-namespace Schedulite;
+namespace Schedulite.Configuration;
 
 public sealed class ScheduliteOptions
 {

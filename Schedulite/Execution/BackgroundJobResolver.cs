@@ -1,6 +1,8 @@
 using Microsoft.Extensions.DependencyInjection;
+using Schedulite.Abstractions;
+using Schedulite.Scheduling;
 
-namespace Schedulite;
+namespace Schedulite.Execution;
 
 internal sealed class BackgroundJobResolver(IServiceScopeFactory scopeFactory, BackgroundJobRegistry registry)
 {

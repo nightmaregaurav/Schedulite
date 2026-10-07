@@ -1,4 +1,6 @@
-namespace Schedulite;
+using Schedulite.Abstractions;
+
+namespace Schedulite.Execution;
 
 internal sealed record BackgroundJobExecutionRequest(
     Guid ExecutionId,

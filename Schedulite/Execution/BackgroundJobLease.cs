@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
+using Schedulite.Abstractions;
 
-namespace Schedulite;
+namespace Schedulite.Execution;
 
 internal sealed class BackgroundJobLease(AsyncServiceScope scope, IBackgroundJob job)
 {

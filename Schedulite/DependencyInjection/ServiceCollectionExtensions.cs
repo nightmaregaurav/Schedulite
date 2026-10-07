@@ -1,7 +1,11 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Schedulite.Abstractions;
+using Schedulite.Configuration;
+using Schedulite.Execution;
+using Schedulite.Scheduling;
 
-namespace Schedulite;
+namespace Schedulite.DependencyInjection;
 
 public static class ServiceCollectionExtensions
 {

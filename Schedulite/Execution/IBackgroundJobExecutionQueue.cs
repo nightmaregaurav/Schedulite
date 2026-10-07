@@ -1,4 +1,4 @@
-namespace Schedulite;
+namespace Schedulite.Execution;
 
 internal interface IBackgroundJobExecutionQueue
 {

@@ -1,6 +1,6 @@
 using System.Threading.Channels;
 
-namespace Schedulite;
+namespace Schedulite.Execution;
 
 internal sealed class InMemoryBackgroundJobExecutionQueue : IBackgroundJobExecutionQueue
 {

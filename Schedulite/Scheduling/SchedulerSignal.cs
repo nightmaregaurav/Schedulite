@@ -1,4 +1,4 @@
-namespace Schedulite;
+namespace Schedulite.Scheduling;
 
 internal sealed class SchedulerSignal
 {

@@ -1,4 +1,7 @@
-namespace Schedulite;
+using Schedulite.Abstractions;
+using Schedulite.Execution;
+
+namespace Schedulite.Scheduling;
 
 internal sealed class BackgroundJobScheduler(IBackgroundJobScheduleProvider scheduleProvider, IBackgroundJobExecutionQueue executionQueue, BackgroundJobRegistry registry, SchedulerSignal signal, TimeProvider timeProvider) : IBackgroundJobScheduler
 {
@@ -39,7 +42,7 @@ internal sealed class BackgroundJobScheduler(IBackgroundJobScheduleProvider sche
         // ReSharper disable once FunctionNeverReturns
     }
 
-    public async Task TriggerAsync(string jobId, string subjectId, CancellationToken cancellationToken = default)
+    public async Task<Guid> TriggerAsync(string jobId, string subjectId, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
         ArgumentException.ThrowIfNullOrWhiteSpace(subjectId);
@@ -49,8 +52,9 @@ internal sealed class BackgroundJobScheduler(IBackgroundJobScheduleProvider sche
             throw new KeyNotFoundException($"No background job with ID '{jobId}' is registered.");
         }
 
+        var executionId = Guid.NewGuid();
         var request = new BackgroundJobExecutionRequest(
-            Guid.NewGuid(),
+            executionId,
             jobId,
             subjectId,
             null,
@@ -58,6 +62,7 @@ internal sealed class BackgroundJobScheduler(IBackgroundJobScheduleProvider sche
         );
 
         await executionQueue.EnqueueAsync(request, cancellationToken);
+        return executionId;
     }
 
     private async Task ReloadAsync(CancellationToken cancellationToken)

@@ -1,4 +1,6 @@
-namespace Schedulite;
+using Schedulite.Abstractions;
+
+namespace Schedulite.Scheduling;
 
 internal sealed class RuntimeSchedule
 {

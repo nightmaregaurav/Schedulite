@@ -1,4 +1,4 @@
-namespace Schedulite;
+namespace Schedulite.Abstractions;
 
 public record BackgroundJobSchedule
 {

@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Hosting;
+using Schedulite.Scheduling;
 
-namespace Schedulite;
+namespace Schedulite.Execution;
 
 internal sealed class ScheduliteHostedService(BackgroundJobScheduler scheduler, BackgroundJobDispatcher dispatcher) : BackgroundService
 {

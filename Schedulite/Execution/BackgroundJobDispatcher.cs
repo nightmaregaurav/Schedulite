@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
+using Schedulite.Abstractions;
 
-namespace Schedulite;
+namespace Schedulite.Execution;
 
 internal sealed class BackgroundJobDispatcher
 {
@@ -37,7 +38,7 @@ internal sealed class BackgroundJobDispatcher
                 _activeExecutions.TryAdd(request.ExecutionId, executionTask);
 
                 _ = executionTask.ContinueWith(
-                    _ => _activeExecutions.TryRemove(request.ExecutionId, out _),
+                    completedTask => _activeExecutions.TryRemove(request.ExecutionId, out _),
                     CancellationToken.None,
                     TaskContinuationOptions.ExecuteSynchronously,
                     TaskScheduler.Default
