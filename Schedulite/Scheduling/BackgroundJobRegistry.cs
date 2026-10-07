@@ -2,6 +2,7 @@ using Schedulite.Abstractions;
 
 namespace Schedulite.Scheduling;
 
+/// <summary>Validates job registrations and provides identifier-based type lookup.</summary>
 internal sealed class BackgroundJobRegistry
 {
     private readonly IReadOnlyDictionary<string, Type> _jobTypes;
@@ -28,6 +29,7 @@ internal sealed class BackgroundJobRegistry
         _jobTypes = registry;
     }
 
+    /// <summary>Returns the implementation type registered for the supplied job identifier.</summary>
     public Type GetJobType(string jobId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
@@ -39,6 +41,7 @@ internal sealed class BackgroundJobRegistry
         return jobType;
     }
 
+    /// <summary>Reports whether a non-empty job identifier is registered.</summary>
     public bool Contains(string jobId)
     {
         return !string.IsNullOrWhiteSpace(jobId) && _jobTypes.ContainsKey(jobId);

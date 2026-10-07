@@ -3,10 +3,14 @@ using Schedulite.Abstractions;
 
 namespace Schedulite.Execution;
 
+/// <summary>Dispatches queued job requests while limiting concurrent executions.</summary>
 internal sealed class BackgroundJobDispatcher
 {
+    /// <summary>Gets the queue from which execution requests are read.</summary>
     private readonly IBackgroundJobExecutionQueue _queue;
+    /// <summary>Gets the resolver used to create scoped job instances.</summary>
     private readonly BackgroundJobResolver _resolver;
+    /// <summary>Gets the semaphore that limits simultaneous job executions.</summary>
     private readonly SemaphoreSlim _concurrencyLimiter;
 
     private readonly ConcurrentDictionary<Guid, Task> _activeExecutions = new();
@@ -26,6 +30,7 @@ internal sealed class BackgroundJobDispatcher
         _concurrencyLimiter = new SemaphoreSlim(maxConcurrency, maxConcurrency);
     }
 
+    /// <summary>Consumes queued requests until cancellation and waits for active executions to finish.</summary>
     public async Task RunAsync(CancellationToken cancellationToken)
     {
         try
@@ -56,6 +61,7 @@ internal sealed class BackgroundJobDispatcher
         }
     }
 
+    /// <summary>Runs one request and releases its concurrency slot even when execution fails.</summary>
     private async Task ExecuteAndReleaseAsync(BackgroundJobExecutionRequest request, CancellationToken cancellationToken)
     {
         try
@@ -73,6 +79,7 @@ internal sealed class BackgroundJobDispatcher
         }
     }
 
+    /// <summary>Coordinates scheduler and dispatcher lifetimes until shutdown.</summary>
     private async Task ExecuteAsync(BackgroundJobExecutionRequest request, CancellationToken cancellationToken)
     {
         await using var lease = await _resolver.ResolveAsync(request.JobId, cancellationToken);

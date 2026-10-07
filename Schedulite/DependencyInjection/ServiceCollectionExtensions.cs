@@ -7,10 +7,19 @@ using Schedulite.Scheduling;
 
 namespace Schedulite.DependencyInjection;
 
+/// <summary>Provides extension methods for registering Schedulite services and jobs.</summary>
 public static class ServiceCollectionExtensions
 {
     extension(IServiceCollection services)
     {
+        /// <summary>Registers the Schedulite scheduler, execution pipeline, and schedule provider.</summary>
+        /// <typeparam name="TProvider">The application implementation that supplies recurring schedules.</typeparam>
+        /// <param name="services">The dependency injection collection to extend.</param>
+        /// <param name="configure">An optional callback that configures concurrency and queue capacity.</param>
+        /// <returns>The same service collection, for chaining additional registrations.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="services"/> is <see langword="null"/>.</exception>
+        /// <exception cref="ArgumentOutOfRangeException">The configured concurrency or queue capacity is not positive.</exception>
+        /// <remarks>Registers the provider and runtime components as singletons and starts the runtime through a hosted service.</remarks>
         public IServiceCollection AddSchedulite<TProvider>(Action<ScheduliteOptions>? configure = null) where TProvider : class, IBackgroundJobScheduleProvider
         {
             // safeguard against null service collection
@@ -70,6 +79,13 @@ public static class ServiceCollectionExtensions
             return services;
         }
 
+        /// <summary>Registers a job type under the identifier referenced by schedules and manual triggers.</summary>
+        /// <typeparam name="TJob">The concrete job implementation to register.</typeparam>
+        /// <param name="jobId">The non-empty identifier used to look up this job.</param>
+        /// <returns>The same service collection, for chaining additional registrations.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="services"/> is <see langword="null"/>.</exception>
+        /// <exception cref="ArgumentException"><paramref name="jobId"/> is null, empty, or whitespace, or is already registered.</exception>
+        /// <remarks>Job instances are registered as transient services so each execution resolves its own instance.</remarks>
         public IServiceCollection AddScheduliteJob<TJob>(string jobId) where TJob : class, IBackgroundJob
         {
             ArgumentNullException.ThrowIfNull(services);

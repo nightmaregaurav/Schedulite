@@ -4,8 +4,10 @@ using Schedulite.Scheduling;
 
 namespace Schedulite.Execution;
 
+/// <summary>Resolves a registered job within a fresh asynchronous dependency injection scope.</summary>
 internal sealed class BackgroundJobResolver(IServiceScopeFactory scopeFactory, BackgroundJobRegistry registry)
 {
+    /// <summary>Creates a scope, resolves the registered job, and returns a lease that owns the scope.</summary>
     public ValueTask<BackgroundJobLease> ResolveAsync(string jobId, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();

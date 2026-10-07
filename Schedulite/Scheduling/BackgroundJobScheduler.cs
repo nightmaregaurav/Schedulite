@@ -3,10 +3,12 @@ using Schedulite.Execution;
 
 namespace Schedulite.Scheduling;
 
+/// <summary>Loads schedules, queues due executions, and responds to manual triggers.</summary>
 internal sealed class BackgroundJobScheduler(IBackgroundJobScheduleProvider scheduleProvider, IBackgroundJobExecutionQueue executionQueue, BackgroundJobRegistry registry, SchedulerSignal signal, TimeProvider timeProvider) : IBackgroundJobScheduler
 {
     private readonly Dictionary<string, RuntimeSchedule> _schedules = new(StringComparer.Ordinal);
 
+    /// <summary>Consumes queued requests until cancellation and waits for active executions to finish.</summary>
     public async Task RunAsync(CancellationToken cancellationToken)
     {
         await ReloadAsync(cancellationToken);
@@ -42,6 +44,7 @@ internal sealed class BackgroundJobScheduler(IBackgroundJobScheduleProvider sche
         // ReSharper disable once FunctionNeverReturns
     }
 
+    /// <summary>Validates the requested job and queues a manual execution.</summary>
     public async Task<Guid> TriggerAsync(string jobId, string subjectId, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
@@ -65,6 +68,7 @@ internal sealed class BackgroundJobScheduler(IBackgroundJobScheduleProvider sche
         return executionId;
     }
 
+    /// <summary>Reloads configured schedules and calculates their next occurrences.</summary>
     private async Task ReloadAsync(CancellationToken cancellationToken)
     {
         var configuredSchedules = await scheduleProvider.GetSchedulesAsync(cancellationToken);
@@ -105,6 +109,7 @@ internal sealed class BackgroundJobScheduler(IBackgroundJobScheduleProvider sche
         }
     }
 
+    /// <summary>Queues each due schedule and advances it to its next occurrence.</summary>
     private async Task ExecuteDueSchedulesAsync(DateTimeOffset now, CancellationToken cancellationToken)
     {
         foreach (var runtimeSchedule in _schedules.Values)
@@ -127,6 +132,7 @@ internal sealed class BackgroundJobScheduler(IBackgroundJobScheduleProvider sche
         }
     }
 
+    /// <summary>Advances a schedule past its current occurrence and skips missed occurrences.</summary>
     private async Task AdvanceSchedule(RuntimeSchedule runtimeSchedule, DateTimeOffset now)
     {
         var nextExecution = await scheduleProvider.GetNextExecution(runtimeSchedule.Schedule.ScheduleRule, runtimeSchedule.NextExecution);
@@ -162,6 +168,7 @@ internal sealed class BackgroundJobScheduler(IBackgroundJobScheduleProvider sche
         }
     }
 
+    /// <summary>Returns the earliest next occurrence among active schedules.</summary>
     private DateTimeOffset? GetNextExecution()
     {
         DateTimeOffset? nextExecution = null;
@@ -175,6 +182,7 @@ internal sealed class BackgroundJobScheduler(IBackgroundJobScheduleProvider sche
         return nextExecution;
     }
 
+    /// <summary>Waits for the next timer deadline or a scheduler reload signal.</summary>
     private async Task<bool> WaitForNextEventAsync(TimeSpan delay, CancellationToken cancellationToken)
     {
         var delayTask = Task.Delay(delay, timeProvider, cancellationToken);

@@ -3,8 +3,10 @@ using Schedulite.Scheduling;
 
 namespace Schedulite.Execution;
 
+/// <summary>Runs the scheduler and dispatcher as coordinated hosted background tasks.</summary>
 internal sealed class ScheduliteHostedService(BackgroundJobScheduler scheduler, BackgroundJobDispatcher dispatcher) : BackgroundService
 {
+    /// <summary>Coordinates scheduler and dispatcher lifetimes until shutdown.</summary>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         using var runtimeCancellation = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
