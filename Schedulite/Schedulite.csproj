@@ -1,0 +1,34 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+        <PackageId>nightmaregaurav.schedulite</PackageId>
+        <Version>1.0.0</Version>
+        <PackageVersion>1.0.0</PackageVersion>
+        <Description>A lightweight and flexible scheduling library for .NET applications.</Description>
+        <Authors>Gaurav Nyaupane</Authors>
+        <Owners>nightmaregaurav</Owners>
+        <PackageProjectUrl>https://github.com/nightmaregaurav/Schedulite</PackageProjectUrl>
+        <RepositoryUrl>https://github.com/nightmaregaurav/Schedulite</RepositoryUrl>
+        <Copyright>Copyright ©2026 Gaurav Nyaupane (nightmaregaurav)</Copyright>
+        <PackageTags>Scheduling;Cron;Task Scheduling;Background Jobs;Job Scheduling; Background Processing;Task Management;Job Execution;Cron Expressions;Task Automation;Job Scheduling Library;Background Task Scheduler;Cron Job Scheduler;Task Scheduling Framework;Job Scheduling Framework;Background Job Processing</PackageTags>
+        <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+        <PackageLicenseFile>LICENSE</PackageLicenseFile>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Cronos" Version="0.13.0" />
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.12" />
+        <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.12" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Include="..\LICENSE" Pack="true" PackagePath="\" />
+        <None Include="..\README.md" Pack="true" PackagePath="\" />
+    </ItemGroup>
+
+</Project>
