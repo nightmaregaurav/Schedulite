@@ -2,6 +2,6 @@ namespace Schedulite;
 
 internal interface IBackgroundJobExecutionQueue
 {
-    ValueTask EnqueueAsync(BackgroundJobExecutionRequest request, CancellationToken cancellationToken);
-    IAsyncEnumerable<BackgroundJobExecutionRequest> ReadAllAsync(CancellationToken cancellationToken);
+    internal ValueTask EnqueueAsync(BackgroundJobExecutionRequest request, CancellationToken cancellationToken);
+    internal IAsyncEnumerable<BackgroundJobExecutionRequest> ReadAllAsync(CancellationToken cancellationToken);
 }

@@ -2,7 +2,7 @@ namespace Schedulite;
 
 public interface IBackgroundJob
 {
-    string JobName { get; }
-    string JobDescription { get; }
-    Task ExecuteAsync(BackgroundJobContext context, CancellationToken cancellationToken);
+    public string JobName { get; }
+    public string JobDescription { get; }
+    public Task ExecuteAsync(BackgroundJobContext context, CancellationToken cancellationToken);
 }
