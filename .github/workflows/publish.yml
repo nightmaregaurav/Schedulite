@@ -1,0 +1,75 @@
+name: Publish NuGet package
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore dependencies
+        run: dotnet restore Schedulite.slnx
+
+      - name: Build
+        run: dotnet build Schedulite.slnx --configuration Release --no-restore
+
+      - name: Run tests
+        run: dotnet test Schedulite.UnitTests/Schedulite.UnitTests.csproj --configuration Release --no-build
+
+      - name: Determine package version
+        id: version
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid package version: $version" >&2
+            exit 1
+          fi
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Pack
+        run: >
+          dotnet pack Schedulite/Schedulite.csproj
+          --configuration Release
+          --no-build
+          --output artifacts
+          -p:PackageVersion=${{ steps.version.outputs.value }}
+
+      - name: Verify package contents
+        shell: bash
+        run: |
+          shopt -s nullglob
+          packages=(artifacts/*.nupkg)
+          if (( ${#packages[@]} != 1 )); then
+            echo "Expected exactly one NuGet package, found ${#packages[@]}." >&2
+            exit 1
+          fi
+          unzip -l "${packages[0]}" | grep -q 'README.md'
+          unzip -l "${packages[0]}" | grep -q 'LICENSE'
+
+      - name: NuGet login (OIDC)
+        uses: NuGet/login@v1
+        id: login
+        with:
+          user: nightmaregaurav
+
+      - name: NuGet push
+        run: >
+          dotnet nuget push artifacts/*.nupkg
+          --api-key ${{ steps.login.outputs.NUGET_API_KEY }}
+          --source https://api.nuget.org/v3/index.json
+          --skip-duplicate
