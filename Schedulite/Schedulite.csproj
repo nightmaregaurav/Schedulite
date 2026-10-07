@@ -4,20 +4,22 @@
         <TargetFramework>net10.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
-        <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
         <PackageId>nightmaregaurav.schedulite</PackageId>
-        <Version>1.0.0</Version>
-        <PackageVersion>1.0.0</PackageVersion>
+        <VersionPrefix>1.0.0</VersionPrefix>
         <Description>A lightweight and flexible scheduling library for .NET applications.</Description>
         <Authors>Gaurav Nyaupane</Authors>
         <Owners>nightmaregaurav</Owners>
+        <Title>Schedulite</Title>
         <PackageProjectUrl>https://github.com/nightmaregaurav/Schedulite</PackageProjectUrl>
         <RepositoryUrl>https://github.com/nightmaregaurav/Schedulite</RepositoryUrl>
+        <RepositoryType>git</RepositoryType>
         <Copyright>Copyright ©2026 Gaurav Nyaupane (nightmaregaurav)</Copyright>
-        <PackageTags>Scheduling;Cron;Task Scheduling;Background Jobs;Job Scheduling; Background Processing;Task Management;Job Execution;Cron Expressions;Task Automation;Job Scheduling Library;Background Task Scheduler;Cron Job Scheduler;Task Scheduling Framework;Job Scheduling Framework;Background Job Processing</PackageTags>
+        <PackageTags>Scheduling;Cron;Background Jobs;Job Scheduling;Background Processing;Task Automation;Cron Expressions;Task Scheduling Framework</PackageTags>
         <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
         <PackageLicenseFile>LICENSE</PackageLicenseFile>
         <PackageReadmeFile>README.md</PackageReadmeFile>
+        <IncludeSymbols>true</IncludeSymbols>
+        <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     </PropertyGroup>
 
     <ItemGroup>
