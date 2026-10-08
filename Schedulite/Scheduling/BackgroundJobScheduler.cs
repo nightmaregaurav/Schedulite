@@ -71,11 +71,19 @@ internal sealed class BackgroundJobScheduler(IBackgroundJobScheduleProvider sche
         return executionId;
     }
 
+    /// <summary>Signals the scheduler to reload schedules from the configured provider.</summary>
+    public Task ReloadSchedulesAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        signal.Signal();
+        return Task.CompletedTask;
+    }
+
     /// <summary>Reloads configured schedules and calculates their next occurrences.</summary>
     private async Task ReloadAsync(CancellationToken cancellationToken)
     {
         var configuredSchedules = await scheduleProvider.GetSchedulesAsync(cancellationToken);
-        _schedules.Clear();
+        var refreshedSchedules = new Dictionary<string, RuntimeSchedule>(StringComparer.Ordinal);
 
         var now = timeProvider.GetUtcNow();
         foreach (var schedule in configuredSchedules)
@@ -93,7 +101,15 @@ internal sealed class BackgroundJobScheduler(IBackgroundJobScheduleProvider sche
                 throw new InvalidOperationException($"Schedule '{schedule.ScheduleId}' references unregistered background job '{schedule.JobId}'.");
             }
 
-            var nextExecution = await scheduleProvider.GetNextExecution(schedule.ScheduleRule, now);
+            DateTimeOffset? nextExecution;
+            if (_schedules.TryGetValue(schedule.ScheduleId, out var existingSchedule))
+            {
+                nextExecution = existingSchedule.NextExecution;
+            }
+            else
+            {
+                nextExecution = await scheduleProvider.GetNextExecution(schedule.ScheduleRule, now);
+            }
             if (nextExecution is null)
             {
                 continue;
@@ -105,10 +121,16 @@ internal sealed class BackgroundJobScheduler(IBackgroundJobScheduleProvider sche
                 NextExecution = nextExecution.Value
             };
 
-            if (!_schedules.TryAdd(schedule.ScheduleId, runtimeSchedule))
+            if (!refreshedSchedules.TryAdd(schedule.ScheduleId, runtimeSchedule))
             {
                 throw new InvalidOperationException($"Duplicate background job schedule ID '{schedule.ScheduleId}'.");
             }
+        }
+
+        _schedules.Clear();
+        foreach (var (scheduleId, runtimeSchedule) in refreshedSchedules)
+        {
+            _schedules.Add(scheduleId, runtimeSchedule);
         }
     }
 

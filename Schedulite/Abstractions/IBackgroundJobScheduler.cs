@@ -1,6 +1,6 @@
 namespace Schedulite.Abstractions;
 
-/// <summary>Provides operations for requesting immediate background job executions.</summary>
+/// <summary>Provides operations for triggering jobs and refreshing recurring schedules.</summary>
 public interface IBackgroundJobScheduler
 {
     /// <summary>Queues a manual execution of a registered job.</summary>
@@ -12,4 +12,10 @@ public interface IBackgroundJobScheduler
     /// <exception cref="KeyNotFoundException">No job is registered with <paramref name="jobId"/>.</exception>
     /// <exception cref="OperationCanceledException">Queuing was canceled through <paramref name="cancellationToken"/>.</exception>
     public Task<Guid> TriggerAsync(string jobId, string? subjectId, CancellationToken cancellationToken = default);
+
+    /// <summary>Requests that the scheduler reload recurring schedules from the configured provider.</summary>
+    /// <param name="cancellationToken">A token that can cancel the request before it is signaled.</param>
+    /// <returns>A task that completes when the reload request has been signaled; it does not wait for the reload to finish.</returns>
+    /// <exception cref="OperationCanceledException">The request was canceled before it was signaled.</exception>
+    public Task ReloadSchedulesAsync(CancellationToken cancellationToken = default);
 }

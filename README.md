@@ -1,8 +1,10 @@
 # Schedulite
 
-Schedulite is a small, extensible background-job scheduler for .NET applications. It runs registered jobs in a hosted service, supports recurring schedules supplied by your application, and exposes an API for triggering a job immediately.
+Schedulite is a small, extensible background-job scheduler for .NET applications. It runs registered jobs in a hosted service, supports recurring schedules supplied by your application, and exposes APIs for triggering jobs immediately and requesting a schedule reload.
 
-The scheduler does not impose a storage provider or a cron format. Your `IBackgroundJobScheduleProvider` loads schedules and translates each application-defined `ScheduleRule` into its next execution time. This makes it suitable for schedules stored in a database, configuration service, or another application-specific system.
+The scheduler does not impose a storage provider or a rule format. A `ScheduleRule` can be any string your `IBackgroundJobScheduleProvider` understands, including cron syntax or an identifier parsed by a lexer or other parser you provide. Your provider loads schedules and translates each rule into its next execution time, so rules can come from a database, configuration service, or another application-specific system.
+
+For more predictable wall-clock timing, prefer rules anchored to a specific time, such as “every day at 9 p.m.” or “at the top of the next hour.” These rules can return the same scheduled clock time whenever they are evaluated, regardless of the current time offset. Small delays can still occur while work waits in the execution queue. Relative interval rules, such as “every five minutes,” depend more on when the schedule is evaluated and can drift. Schedulite calculates later cycles from the schedule's previous next-execution time to help limit that drift, but clock-based rules are recommended when execution time should stay aligned to a particular time of day.
 
 ## Requirements
 
@@ -89,7 +91,7 @@ public sealed class MyScheduleProvider : IBackgroundJobScheduleProvider
                 ScheduleId = "daily-reminder",
                 JobId = "send-reminder",
                 SubjectId = "customer-42",
-                ScheduleRule = "daily",
+                ScheduleRule = "daily-at-9pm",
                 Enabled = true
             }
         ];
@@ -103,7 +105,10 @@ public sealed class MyScheduleProvider : IBackgroundJobScheduleProvider
     {
         return scheduleRule switch
         {
-            "daily" => Task.FromResult<DateTimeOffset?>(now.AddDays(1)),
+            "daily-at-9pm" => Task.FromResult<DateTimeOffset?>(
+                now.TimeOfDay < TimeSpan.FromHours(21)
+                    ? now.Date.AddHours(21)
+                    : now.Date.AddDays(1).AddHours(21)),
             _ => throw new ArgumentException(
                 $"Unknown schedule rule '{scheduleRule}'.",
                 nameof(scheduleRule))
@@ -116,7 +121,7 @@ The schedule provider is reloaded when the hosted scheduler starts and when it i
 
 ## Trigger a job immediately
 
-Inject `IBackgroundJobScheduler` and call `TriggerAsync`:
+Inject `IBackgroundJobScheduler` to trigger a job immediately or request a reload after the provider's schedules change:
 
 ```csharp
 using Schedulite.Abstractions;
@@ -133,6 +138,12 @@ public sealed class ReminderController(IBackgroundJobScheduler scheduler)
             cancellationToken);
     }
 }
+```
+
+After updating the data used by `IBackgroundJobScheduleProvider`, call `ReloadSchedulesAsync` to notify the scheduler:
+
+```csharp
+await scheduler.ReloadSchedulesAsync(cancellationToken);
 ```
 
 Each execution receives a `BackgroundJobContext` containing an execution ID, job ID, subject ID, optional schedule ID, and whether the trigger was manual or scheduled. Jobs should honor the cancellation token.
