@@ -12,7 +12,9 @@ internal sealed class BackgroundJobDispatcher
     private readonly BackgroundJobResolver _resolver;
     /// <summary>Gets the semaphore that limits simultaneous job executions.</summary>
     private readonly SemaphoreSlim _concurrencyLimiter;
-
+    /// <summary>Gets the keyed lock that prevents overlapping executions of the same job or subject as needed.</summary>
+    private readonly KeyedExecutionLock _executionLock = new();
+    /// <summary>Gets the dictionary of currently active executions, keyed by execution ID.</summary>
     private readonly ConcurrentDictionary<Guid, Task> _activeExecutions = new();
 
     public BackgroundJobDispatcher(IBackgroundJobExecutionQueue queue, BackgroundJobResolver resolver, int maxConcurrency)
@@ -83,6 +85,27 @@ internal sealed class BackgroundJobDispatcher
     private async Task ExecuteAsync(BackgroundJobExecutionRequest request, CancellationToken cancellationToken)
     {
         await using var lease = await _resolver.ResolveAsync(request.JobId, cancellationToken);
+        var scope = lease.Job.ConcurrencyScope;
+        ExecutionLockKey? lockKey;
+        if (scope == ExecutionConcurrencyScope.Unrestricted)
+        {
+            lockKey = null;
+        }
+        else if (scope == ExecutionConcurrencyScope.PerJob)
+        {
+            lockKey = new ExecutionLockKey(request.JobId, null);
+        }
+        else if (scope == ExecutionConcurrencyScope.PerSubject)
+        {
+            lockKey = new ExecutionLockKey(request.JobId, request.SubjectId);
+        }
+        else
+        {
+            throw new InvalidOperationException($"Background job '{request.JobId}' has an unsupported concurrency scope '{scope}'.");
+        }
+
+        using var executionLock = lockKey is null ? null : await _executionLock.AcquireAsync(lockKey.Value, cancellationToken);
+
         var context = new BackgroundJobContext
         {
             ExecutionId = request.ExecutionId,
@@ -92,5 +115,78 @@ internal sealed class BackgroundJobDispatcher
             Trigger = request.Trigger
         };
         await lease.Job.ExecuteAsync(context, cancellationToken);
+    }
+
+    private readonly record struct ExecutionLockKey(string JobId, string? SubjectId);
+
+    /// <summary>Provides per-key asynchronous locks and removes idle keys to bound memory use.</summary>
+    private sealed class KeyedExecutionLock
+    {
+        private readonly Lock _gate = new();
+        private readonly Dictionary<ExecutionLockKey, LockEntry> _entries = new();
+
+        public async ValueTask<IDisposable> AcquireAsync(ExecutionLockKey key, CancellationToken cancellationToken)
+        {
+            LockEntry entry;
+            lock (_gate)
+            {
+                if (!_entries.TryGetValue(key, out entry!))
+                {
+                    entry = new LockEntry();
+                    _entries.Add(key, entry);
+                }
+
+                entry.References++;
+            }
+
+            try
+            {
+                await entry.Semaphore.WaitAsync(cancellationToken);
+                return new Releaser(this, key, entry);
+            }
+            catch
+            {
+                ReleaseReference(key, entry);
+                throw;
+            }
+        }
+
+        private void Release(ExecutionLockKey key, LockEntry entry)
+        {
+            entry.Semaphore.Release();
+            ReleaseReference(key, entry);
+        }
+
+        private void ReleaseReference(ExecutionLockKey key, LockEntry entry)
+        {
+            lock (_gate)
+            {
+                entry.References--;
+                if (entry.References == 0)
+                {
+                    _entries.Remove(key);
+                    entry.Semaphore.Dispose();
+                }
+            }
+        }
+
+        private sealed class LockEntry
+        {
+            public SemaphoreSlim Semaphore { get; } = new(1, 1);
+            public int References { get; set; }
+        }
+
+        private sealed class Releaser(KeyedExecutionLock owner, ExecutionLockKey key, LockEntry entry) : IDisposable
+        {
+            private int _released;
+
+            public void Dispose()
+            {
+                if (Interlocked.Exchange(ref _released, 1) == 0)
+                {
+                    owner.Release(key, entry);
+                }
+            }
+        }
     }
 }

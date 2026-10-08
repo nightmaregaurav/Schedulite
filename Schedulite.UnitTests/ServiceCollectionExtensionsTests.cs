@@ -136,7 +136,6 @@ public sealed class ServiceCollectionExtensionsTests
     [Theory]
     [InlineData(null, "subject")]
     [InlineData(" ", "subject")]
-    [InlineData("test", null)]
     [InlineData("test", " ")]
     public async Task TriggerAsync_RejectsBlankJobOrSubjectIds(string? jobId, string? subjectId)
     {

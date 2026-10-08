@@ -8,7 +8,7 @@ public sealed record BackgroundJobContext
     /// <summary>Gets the registered identifier of the job being executed.</summary>
     public required string JobId { get; init; }
     /// <summary>Gets the identifier of the subject the job is operating on.</summary>
-    public required string SubjectId { get; init; }
+    public required string? SubjectId { get; init; }
     /// <summary>Gets the identifier of the recurring schedule that created this execution, or <see langword="null"/> for a manual trigger.</summary>
     public string? ScheduleId { get; init; }
     /// <summary>Gets whether this execution was created by a schedule or requested manually.</summary>

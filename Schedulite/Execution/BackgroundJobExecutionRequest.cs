@@ -6,7 +6,7 @@ namespace Schedulite.Execution;
 internal sealed record BackgroundJobExecutionRequest(
     Guid ExecutionId,
     string JobId,
-    string SubjectId,
+    string? SubjectId,
     string? ScheduleId,
     BackgroundJobTrigger Trigger
 );

@@ -45,10 +45,13 @@ internal sealed class BackgroundJobScheduler(IBackgroundJobScheduleProvider sche
     }
 
     /// <summary>Validates the requested job and queues a manual execution.</summary>
-    public async Task<Guid> TriggerAsync(string jobId, string subjectId, CancellationToken cancellationToken = default)
+    public async Task<Guid> TriggerAsync(string jobId, string? subjectId, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(subjectId);
+        if (subjectId is not null)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(subjectId);
+        }
 
         if (!registry.Contains(jobId))
         {

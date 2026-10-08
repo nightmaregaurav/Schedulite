@@ -3,6 +3,9 @@ namespace Schedulite.Abstractions;
 /// <summary>Represents a unit of work that Schedulite can execute in the background.</summary>
 public interface IBackgroundJob
 {
+    /// <summary>Gets the execution concurrency scope for this job. Defaults to allowing overlapping executions.</summary>
+    public ExecutionConcurrencyScope ConcurrencyScope => ExecutionConcurrencyScope.Unrestricted;
+
     /// <summary>Gets the human-readable name of this job.</summary>
     public string JobName { get; }
     /// <summary>Gets a human-readable description of this job.</summary>

@@ -8,7 +8,7 @@ public record BackgroundJobSchedule
     /// <summary>Gets the registered identifier of the job to run.</summary>
     public required string JobId { get; init; }
     /// <summary>Gets the identifier of the subject passed to the job.</summary>
-    public required string SubjectId { get; init; }
+    public required string? SubjectId { get; init; }
     /// <summary>Gets the application-defined rule interpreted by the schedule provider.</summary>
     public required string ScheduleRule { get; init; }
     /// <summary>Gets whether this schedule should be considered for execution. Defaults to <see langword="true"/>.</summary>

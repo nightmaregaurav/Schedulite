@@ -51,6 +51,27 @@ public sealed class SendReminderJob : IBackgroundJob
 }
 ```
 
+Jobs may choose how their executions are serialized. The default is `Unrestricted`, which allows executions to overlap. Set `ConcurrencyScope` to `PerJob` to allow only one execution of that registered job at a time, or `PerSubject` to allow one execution per job and subject pair while still running different subjects concurrently:
+
+```csharp
+public sealed class ProcessTenantQueueJob : IBackgroundJob
+{
+    public string JobName => "Process tenant queue";
+    public string JobDescription => "Processes pending work for a tenant.";
+    public ExecutionConcurrencyScope ConcurrencyScope => ExecutionConcurrencyScope.PerSubject;
+
+    public Task ExecuteAsync(
+        BackgroundJobContext context,
+        CancellationToken cancellationToken)
+    {
+        // Process pending work for context.SubjectId.
+        return Task.CompletedTask;
+    }
+}
+```
+
+When an execution conflicts with one already running, it waits for that execution to finish. A `null` subject is treated as one shared subject for that job, and may be supplied to `TriggerAsync` for jobs without a subject. This serialization applies within one Schedulite process; jobs that run in multiple application instances still need application-level coordination.
+
 Implement the schedule provider. Schedule IDs must be stable and unique; do not generate a new ID every time schedules are loaded.
 
 ```csharp
