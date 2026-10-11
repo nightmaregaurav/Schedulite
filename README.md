@@ -51,17 +51,46 @@ builder.Services.AddScheduliteJob<EmailJob>("notifications", "process");
 
 Schedulite registers its scheduler, schedule provider, options, and jobs as keyed services. The no-ID registration methods use the null key. Inject the default runtime with `[FromKeyedServices(null)]`; use the runtime ID to inject a named runtime.
 
-For a named runtime, inject the scheduler with its key:
+### Manage jobs across runtimes
+
+Use the unkeyed `IScheduliteManager` as the primary management API when an application needs to inspect or operate across runtimes. Its `ListAsync` result groups registered job IDs and provider schedules by runtime. Each schedule reports the next occurrence currently held by that runtime's scheduler. `NotQueued` is `true` when the schedule is not in the scheduler's active schedule set; in that case, `NextExecution` is `null`.
+
+```csharp
+using Schedulite.Abstractions;
+
+public sealed class JobManagement(IScheduliteManager manager)
+{
+    public Task<IReadOnlyCollection<ScheduliteRuntimeInfo>> ListAsync(
+        CancellationToken cancellationToken) => manager.ListAsync(cancellationToken);
+
+    public Task<Guid> TriggerBillingJobAsync(CancellationToken cancellationToken) =>
+        manager.TriggerAsync("billing", "process", "invoice-42", cancellationToken);
+
+    public Task ReloadBillingAsync(CancellationToken cancellationToken) =>
+        manager.ReloadAsync("billing", cancellationToken);
+
+    public Task ReloadEverythingAsync(CancellationToken cancellationToken) =>
+        manager.ReloadAllAsync(cancellationToken);
+}
+```
+
+### Access one runtime directly
+
+For a service dedicated to one runtime, inject its keyed `IBackgroundJobScheduler` and `IBackgroundJobScheduleProvider`. The scheduler queues triggers on that runtime; the provider loads that runtime's schedule definitions and interprets its rule strings.
 
 ```csharp
 using Microsoft.Extensions.DependencyInjection;
 using Schedulite.Abstractions;
 
 public sealed class BillingController(
-    [FromKeyedServices("billing")] IBackgroundJobScheduler scheduler)
+    [FromKeyedServices("billing")] IBackgroundJobScheduler scheduler,
+    [FromKeyedServices("billing")] IBackgroundJobScheduleProvider scheduleProvider)
 {
     public Task<Guid> TriggerAsync(CancellationToken cancellationToken) =>
         scheduler.TriggerAsync("process", "invoice-42", cancellationToken);
+
+    public Task<IReadOnlyCollection<BackgroundJobSchedule>> ListSchedulesAsync(
+        CancellationToken cancellationToken) => scheduleProvider.GetSchedulesAsync(cancellationToken);
 }
 ```
 
@@ -163,19 +192,19 @@ Schedulite resolves the provider in an asynchronous dependency injection scope f
 
 ## Trigger a job immediately
 
-Inject `IBackgroundJobScheduler` to trigger a job immediately or request a reload after the provider's schedules change:
+Use `IScheduliteManager` to trigger a job immediately or request a reload after the provider's schedules change:
 
 ```csharp
-using Microsoft.Extensions.DependencyInjection;
 using Schedulite.Abstractions;
 
-public sealed class ReminderController([FromKeyedServices(null)] IBackgroundJobScheduler scheduler)
+public sealed class ReminderController(IScheduliteManager manager)
 {
     public async Task<Guid> TriggerAsync(
         string subjectId,
         CancellationToken cancellationToken)
     {
-        return await scheduler.TriggerAsync(
+        return await manager.TriggerAsync(
+            null,
             "send-reminder",
             subjectId,
             cancellationToken);
@@ -183,10 +212,11 @@ public sealed class ReminderController([FromKeyedServices(null)] IBackgroundJobS
 }
 ```
 
-After updating the data used by `IBackgroundJobScheduleProvider`, call `ReloadSchedulesAsync` to notify the scheduler:
+After updating the data used by `IBackgroundJobScheduleProvider`, call `ReloadAsync` for that runtime or `ReloadAllAsync` to notify every runtime:
 
 ```csharp
-await scheduler.ReloadSchedulesAsync(cancellationToken);
+await manager.ReloadAsync(null, cancellationToken); // default runtime
+await manager.ReloadAllAsync(cancellationToken);    // every runtime
 ```
 
 Jobs do not need a recurring schedule to be useful. Register an on-demand job such as `SendDigestJob` and call `TriggerAsync` from an API endpoint, message consumer, or application service. Each execution receives a `BackgroundJobContext` containing an execution ID, runtime ID, job ID, subject ID, optional schedule ID, and whether the trigger was manual or scheduled. Jobs should honor the cancellation token.
@@ -194,31 +224,6 @@ Jobs do not need a recurring schedule to be useful. Register an on-demand job su
 ## Runtime guarantees and limits
 
 Each runtime uses a bounded, in-memory execution queue. Queued work is lost if the process exits before dispatch, and Schedulite does not persist execution state, retry failed jobs, or claim work across application replicas. Schedulite logs runtime lifecycle, schedule reloads, queue pressure, job start/completion, and failures through `Microsoft.Extensions.Logging`; the dispatcher continues with later executions after a job failure. Each replica schedules independently, so deploying multiple replicas can run the same schedule more than once. The concurrency scopes coordinate executions only within one runtime in one process. After 1,000 missed occurrences, Schedulite asks the provider to jump to the next occurrence after the current time to bound catch-up work; relative interval rules may rebase after a long outage. Use an application-owned durable queue and distributed coordination when jobs require persistence, retries, or cross-replica uniqueness.
-
-## Manage all runtimes
-
-Inject the unkeyed `IScheduliteManager` to work across every registered runtime. `ListAsync` returns one `ScheduliteRuntimeInfo` per runtime, including registered job IDs and the schedules currently returned by that runtime's provider. A job without a recurring schedule still appears in `JobIds`.
-
-```csharp
-using Schedulite.Abstractions;
-
-public sealed class JobManagement(IScheduliteManager manager)
-{
-    public Task<IReadOnlyCollection<ScheduliteRuntimeInfo>> ListAsync(
-        CancellationToken cancellationToken) => manager.ListAsync(cancellationToken);
-
-    public Task<Guid> TriggerBillingJobAsync(CancellationToken cancellationToken) =>
-        manager.TriggerAsync("billing", "process", "invoice-42", cancellationToken);
-
-    public Task ReloadBillingAsync(CancellationToken cancellationToken) =>
-        manager.ReloadAsync("billing", cancellationToken);
-
-    public Task ReloadEverythingAsync(CancellationToken cancellationToken) =>
-        manager.ReloadAllAsync(cancellationToken);
-}
-```
-
-Pass `null` as the runtime ID to select the default runtime. To calculate a schedule's next occurrence, pass its runtime ID and `ScheduleRule` to `GetNextExecutionAsync`; the reference time defaults to the current UTC time. As with the provider's `GetNextExecution`, the calculation itself does not accept a cancellation token.
 
 This implementation provides in-process best-effort scheduling; it does not promise at-least-once or exactly-once job delivery.
 

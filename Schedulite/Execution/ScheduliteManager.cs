@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Schedulite.Abstractions;
+using Schedulite.Scheduling;
 
 namespace Schedulite.Execution;
 
@@ -7,7 +8,6 @@ namespace Schedulite.Execution;
 internal sealed class ScheduliteManager(
     IServiceProvider serviceProvider,
     IServiceScopeFactory scopeFactory,
-    TimeProvider timeProvider,
     IEnumerable<ScheduliteRuntimeRegistration> registrations) : IScheduliteManager
 {
     private readonly ScheduliteRuntimeRegistration[] _registrations = registrations.ToArray();
@@ -24,12 +24,13 @@ internal sealed class ScheduliteManager(
             var scheduleProvider = scope.ServiceProvider.GetRequiredKeyedService<IBackgroundJobScheduleProvider>(registration.InstanceId);
             var schedules = await scheduleProvider.GetSchedulesAsync(cancellationToken);
             ArgumentNullException.ThrowIfNull(schedules);
+            var scheduler = serviceProvider.GetRequiredKeyedService<BackgroundJobScheduler>(registration.InstanceId);
 
             var backgroundJobModels = new List<BackgroundJobInfoModel>(schedules.Count);
             foreach (var s in schedules)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var nextExecution = await scheduleProvider.GetNextExecution(s.ScheduleRule, timeProvider.GetUtcNow());
+                var isQueued = scheduler.TryGetNextExecution(s.ScheduleId, out var nextExecution);
                 backgroundJobModels.Add(new BackgroundJobInfoModel
                 {
                     ScheduliteInstanceId = registration.InstanceId,
@@ -38,7 +39,8 @@ internal sealed class ScheduliteManager(
                     SubjectId = s.SubjectId,
                     ScheduleRule = s.ScheduleRule,
                     Enabled = s.Enabled,
-                    NextExecution = nextExecution
+                    NotQueued = !isQueued,
+                    NextExecution = isQueued ? nextExecution : null
                 });
             }
 

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Schedulite.Abstractions;
@@ -25,6 +26,14 @@ internal sealed class BackgroundJobScheduler(
 
     // The execution schedule dictionary is keyed by schedule ID and contains the next occurrence for each active schedule.
     private readonly Dictionary<string, ExecutionSchedule> _schedules = new(StringComparer.Ordinal);
+    // A concurrent snapshot lets management APIs read each schedule's current queued occurrence safely.
+    private readonly ConcurrentDictionary<string, DateTimeOffset> _queuedScheduleExecutions = new(StringComparer.Ordinal);
+
+    /// <summary>Looks up the next occurrence currently held by the scheduler for a schedule ID.</summary>
+    public bool TryGetNextExecution(string scheduleId, out DateTimeOffset nextExecution)
+    {
+        return _queuedScheduleExecutions.TryGetValue(scheduleId, out nextExecution);
+    }
 
     /// <summary>Consumes queued requests until cancellation and waits for active executions to finish.</summary>
     public async Task RunAsync(CancellationToken cancellationToken)
@@ -189,10 +198,12 @@ internal sealed class BackgroundJobScheduler(
         }
 
         _schedules.Clear();
+        _queuedScheduleExecutions.Clear();
         foreach (var (scheduleId, runtimeSchedule) in refreshedSchedules)
         {
             cancellationToken.ThrowIfCancellationRequested();
             _schedules.Add(scheduleId, runtimeSchedule);
+            _queuedScheduleExecutions[scheduleId] = runtimeSchedule.NextExecution;
         }
 
         logger.LogInformation(
@@ -229,6 +240,7 @@ internal sealed class BackgroundJobScheduler(
             await executionQueue.EnqueueAsync(request, cancellationToken);
             if (await AdvanceSchedule(runtimeSchedule, now, cancellationToken))
             {
+                _queuedScheduleExecutions[runtimeSchedule.Schedule.ScheduleId] = runtimeSchedule.NextExecution;
                 continue;
             }
 
@@ -241,6 +253,7 @@ internal sealed class BackgroundJobScheduler(
             foreach (var scheduleId in exhaustedScheduleIds)
             {
                 _schedules.Remove(scheduleId);
+                _queuedScheduleExecutions.TryRemove(scheduleId, out _);
             }
         }
     }
