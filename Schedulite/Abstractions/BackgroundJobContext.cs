@@ -5,6 +5,8 @@ public sealed record BackgroundJobContext
 {
     /// <summary>Gets the unique identifier assigned to this execution.</summary>
     public required Guid ExecutionId { get; init; }
+    /// <summary>Gets the identifier of the Schedulite runtime that created this execution, or <see langword="null"/> for the default runtime.</summary>
+    public string? InstanceId { get; init; }
     /// <summary>Gets the registered identifier of the job being executed.</summary>
     public required string JobId { get; init; }
     /// <summary>Gets the identifier of the subject the job is operating on.</summary>

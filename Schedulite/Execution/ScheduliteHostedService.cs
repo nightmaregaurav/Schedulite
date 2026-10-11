@@ -10,20 +10,15 @@ internal sealed class ScheduliteHostedService(BackgroundJobScheduler scheduler, 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         using var runtimeCancellation = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-
         var runtimeToken = runtimeCancellation.Token;
 
         var schedulerTask = scheduler.RunAsync(runtimeToken);
         var dispatcherTask = dispatcher.RunAsync(runtimeToken);
-
         try
         {
-            var completedTask = await Task.WhenAny(schedulerTask, dispatcherTask);
-
-            // If either runtime component stops unexpectedly,
-            // stop the other one as well.
-            await runtimeCancellation.CancelAsync();
-            await completedTask;
+            // If either runtime component stops unexpectedly or OperationCanceledException is thrown,
+            // we jump to finally to gracefully exit
+            await Task.WhenAny(schedulerTask, dispatcherTask);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
@@ -31,9 +26,12 @@ internal sealed class ScheduliteHostedService(BackgroundJobScheduler scheduler, 
         }
         finally
         {
+            // Ensure the runtime is properly canceled
             await runtimeCancellation.CancelAsync();
             try
             {
+                // We sent the cancellation signal using token already, so these tasks should complete quickly.
+                // We will wait for them to ensure proper cleanup
                 await Task.WhenAll(schedulerTask, dispatcherTask);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)

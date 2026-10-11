@@ -1,11 +1,15 @@
 namespace Schedulite.Abstractions;
 
 /// <summary>Loads recurring schedules and interprets their application-defined rules.</summary>
+/// <remarks>
+/// Schedulite resolves the provider in a fresh asynchronous dependency injection scope for each call.
+/// Implementations should keep durable or shared state in their backing services rather than in provider instance fields.
+/// </remarks>
 public interface IBackgroundJobScheduleProvider
 {
     /// <summary>Loads the schedules currently configured by the application.</summary>
     /// <param name="cancellationToken">A token that requests cancellation of the load.</param>
-    /// <returns>A task containing the current schedules; disabled entries may be returned and are ignored by the scheduler.</returns>
+    /// <returns>A task containing the current schedules; disabled entries are not scheduled, but schedule IDs must still be unique within the runtime.</returns>
     /// <exception cref="OperationCanceledException">The load was canceled through <paramref name="cancellationToken"/>.</exception>
     public Task<IReadOnlyCollection<BackgroundJobSchedule>> GetSchedulesAsync(CancellationToken cancellationToken = default);
     /// <summary>Calculates the next occurrence of a rule after the supplied time.</summary>
@@ -13,6 +17,6 @@ public interface IBackgroundJobScheduleProvider
     /// <param name="now">The reference time from which to calculate the next occurrence.</param>
     /// <returns>A task containing the next occurrence, or <see langword="null"/> when the rule has no future occurrence.</returns>
     /// <exception cref="ArgumentException">The rule is invalid or unsupported.</exception>
-    /// <exception cref="OperationCanceledException">Implementations may throw this when their calculation is canceled.</exception>
+    /// <remarks>This method has no cancellation token, so calculations should complete promptly.</remarks>
     public Task<DateTimeOffset?> GetNextExecution(string scheduleRule, DateTimeOffset now);
 }

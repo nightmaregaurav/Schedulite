@@ -1,5 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Schedulite.Abstractions;
 using Schedulite.Configuration;
 using Schedulite.Execution;
@@ -7,96 +9,183 @@ using Schedulite.Scheduling;
 
 namespace Schedulite.DependencyInjection;
 
-/// <summary>Provides extension methods for registering Schedulite services and jobs.</summary>
+/// <summary>Registers Schedulite runtimes and jobs with dependency injection.</summary>
 public static class ServiceCollectionExtensions
 {
-    extension(IServiceCollection services)
+    /// <summary>Registers the default runtime using the null dependency-injection key.</summary>
+    /// <typeparam name="TProvider">The application implementation that supplies recurring schedules.</typeparam>
+    /// <param name="services">The application's service collection.</param>
+    /// <returns>The same service collection, for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="services"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">The default runtime is already registered.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">A configured limit is not positive.</exception>
+    public static IServiceCollection AddSchedulite<TProvider>(this IServiceCollection services) where TProvider : class, IBackgroundJobScheduleProvider
     {
-        /// <summary>Registers the Schedulite scheduler, execution pipeline, and schedule provider.</summary>
-        /// <typeparam name="TProvider">The application implementation that supplies recurring schedules.</typeparam>
-        /// <param name="services">The dependency injection collection to extend.</param>
-        /// <param name="configure">An optional callback that configures concurrency and queue capacity.</param>
-        /// <returns>The same service collection, for chaining additional registrations.</returns>
-        /// <exception cref="ArgumentNullException"><paramref name="services"/> is <see langword="null"/>.</exception>
-        /// <exception cref="ArgumentOutOfRangeException">The configured concurrency or queue capacity is not positive.</exception>
-        /// <remarks>Registers the provider and runtime components as singletons and starts the runtime through a hosted service.</remarks>
-        public IServiceCollection AddSchedulite<TProvider>(Action<ScheduliteOptions>? configure = null) where TProvider : class, IBackgroundJobScheduleProvider
-        {
-            // safeguard against null service collection
-            ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(services);
+        return AddScheduliteCore<TProvider>(services, null, new ScheduliteOptions());
+    }
 
-            // configure options
-            var options = new ScheduliteOptions();
-            configure?.Invoke(options);
-            options.Validate();
-            services.AddSingleton(options);
+    /// <summary>Registers the default runtime using the null dependency-injection key.</summary>
+    /// <typeparam name="TProvider">The application implementation that supplies recurring schedules.</typeparam>
+    /// <param name="services">The application's service collection.</param>
+    /// <param name="options">Schedulite runtime configuration options.</param>
+    /// <returns>The same service collection, for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="services"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">The default runtime is already registered.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">A configured limit is not positive.</exception>
+    public static IServiceCollection AddSchedulite<TProvider>(this IServiceCollection services, ScheduliteOptions options) where TProvider : class, IBackgroundJobScheduleProvider
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        return AddScheduliteCore<TProvider>(services, null, options);
+    }
 
-            // to ensure that the system clock is used consistently across the library, we register a singleton TimeProvider
-            services.AddSingleton(TimeProvider.System);
+    /// <summary>Registers a named runtime with its own schedules, jobs, limits, and queue.</summary>
+    /// <typeparam name="TProvider">The application implementation that supplies recurring schedules.</typeparam>
+    /// <param name="services">The application's service collection.</param>
+    /// <param name="instanceId">The key used to select this runtime's services.</param>
+    /// <returns>The same service collection, for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="services"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException"><paramref name="instanceId"/> is blank or already registered.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">A configured limit is not positive.</exception>
+    public static IServiceCollection AddSchedulite<TProvider>(this IServiceCollection services, string instanceId) where TProvider : class, IBackgroundJobScheduleProvider
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentException.ThrowIfNullOrWhiteSpace(instanceId);
+        return AddScheduliteCore<TProvider>(services, instanceId, new ScheduliteOptions());
+    }
 
-            // this will send signals to the scheduler when a new job is scheduled, so that it can wake up and process the job immediately
-            services.AddSingleton<SchedulerSignal>();
+    /// <summary>Registers a named runtime with its own schedules, jobs, limits, and queue.</summary>
+    /// <typeparam name="TProvider">The application implementation that supplies recurring schedules.</typeparam>
+    /// <param name="services">The application's service collection.</param>
+    /// <param name="instanceId">The key used to select this runtime's services.</param>
+    /// <param name="options">Schedulite runtime configuration options.</param>
+    /// <returns>The same service collection, for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="services"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException"><paramref name="instanceId"/> is blank or already registered.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">A configured limit is not positive.</exception>
+    public static IServiceCollection AddSchedulite<TProvider>(this IServiceCollection services, string instanceId, ScheduliteOptions options) where TProvider : class, IBackgroundJobScheduleProvider
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentException.ThrowIfNullOrWhiteSpace(instanceId);
+        return AddScheduliteCore<TProvider>(services, instanceId, options);
+    }
 
-            // register the schedule provider that will provide the schedules for the jobs
-            services.AddSingleton<IBackgroundJobScheduleProvider, TProvider>();
+    /// <summary>Registers a job in the default runtime under the null dependency-injection key.</summary>
+    /// <typeparam name="TJob">The concrete job implementation.</typeparam>
+    /// <param name="services">The application's service collection.</param>
+    /// <param name="jobId">The unique identifier for this job in the runtime.</param>
+    /// <returns>The same service collection, for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="services"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException"><paramref name="jobId"/> is blank or already registered, or <typeparamref name="TJob"/> is abstract or open generic.</exception>
+    public static IServiceCollection AddScheduliteJob<TJob>(this IServiceCollection services, string jobId) where TJob : class, IBackgroundJob
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        return AddScheduliteJobCore<TJob>(services, null, jobId);
+    }
 
-            // register the background job execution queue with a capacity defined in the options
-            services.AddSingleton<IBackgroundJobExecutionQueue>(
-                provider =>
-                {
-                    var configuredOptions = provider.GetRequiredService<ScheduliteOptions>();
-                    return new InMemoryBackgroundJobExecutionQueue(configuredOptions.ExecutionQueueCapacity);
-                }
-            );
+    /// <summary>Registers a job in the named runtime.</summary>
+    /// <typeparam name="TJob">The concrete job implementation.</typeparam>
+    /// <param name="services">The application's service collection.</param>
+    /// <param name="instanceId">The key of the runtime that owns the job.</param>
+    /// <param name="jobId">The unique identifier for this job in the runtime.</param>
+    /// <returns>The same service collection, for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="services"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException"><paramref name="instanceId"/> or <paramref name="jobId"/> is blank, the job ID is already registered in that runtime, or <typeparamref name="TJob"/> is abstract or open generic.</exception>
+    public static IServiceCollection AddScheduliteJob<TJob>(this IServiceCollection services, string instanceId, string jobId) where TJob : class, IBackgroundJob
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentException.ThrowIfNullOrWhiteSpace(instanceId);
+        return AddScheduliteJobCore<TJob>(services, instanceId, jobId);
+    }
 
-            // the registry that actually keeps track of the registered jobs and their types and allow resolving them by their ID
-            services.AddSingleton<BackgroundJobRegistry>();
-
-            // the resolver that uses the service provider to resolve job instances by their ID
-            services.AddSingleton<BackgroundJobResolver>();
-
-            // the scheduler that manages the scheduling of jobs and their execution
-            services.AddSingleton<BackgroundJobScheduler>();
-            // abstract layer so that external code can use instant trigger for background jobs
-            services.AddSingleton<IBackgroundJobScheduler>(provider => provider.GetRequiredService<BackgroundJobScheduler>());
-
-            // the dispatcher that actually executes the jobs from the schedules
-            services.AddSingleton(
-                provider =>
-                {
-                    var configuredOptions = provider.GetRequiredService<ScheduliteOptions>();
-                    return new BackgroundJobDispatcher(
-                        provider.GetRequiredService<IBackgroundJobExecutionQueue>(),
-                        provider.GetRequiredService<BackgroundJobResolver>(),
-                        configuredOptions.MaxConcurrency
-                    );
-                }
-            );
-
-            // the service that runs the scheduler and dispatcher in the background as a hosted service
-            services.AddHostedService<ScheduliteHostedService>();
-
-            return services;
+    private static IServiceCollection AddScheduliteCore<TProvider>(IServiceCollection services, string? instanceId, ScheduliteOptions options) where TProvider : class, IBackgroundJobScheduleProvider
+    {
+        // Every runtime exposes one keyed scheduler, so check for duplicates before registering any keyed services.
+        if (services
+            .Any(descriptor =>
+                descriptor.ServiceType == typeof(IBackgroundJobScheduler) &&
+                descriptor.IsKeyedService &&
+                Equals(descriptor.ServiceKey, instanceId)
+            )
+        ) {
+            throw new ArgumentException($"A Schedulite runtime with ID '{instanceId ?? "<null>"}' is already registered.", nameof(instanceId));
         }
 
-        /// <summary>Registers a job type under the identifier referenced by schedules and manual triggers.</summary>
-        /// <typeparam name="TJob">The concrete job implementation to register.</typeparam>
-        /// <param name="jobId">The non-empty identifier used to look up this job.</param>
-        /// <returns>The same service collection, for chaining additional registrations.</returns>
-        /// <exception cref="ArgumentNullException"><paramref name="services"/> is <see langword="null"/>.</exception>
-        /// <exception cref="ArgumentException"><paramref name="jobId"/> is null, empty, or whitespace, or is already registered.</exception>
-        /// <remarks>Job instances are registered as transient services so each execution resolves its own instance.</remarks>
-        public IServiceCollection AddScheduliteJob<TJob>(string jobId) where TJob : class, IBackgroundJob
+        // prepare the option object and validate it before registering any runtime services
+        options.Validate();
+        // inject the option object as singleton so it can be accessed later
+        services.AddKeyedSingleton(instanceId, options);
+
+        // The clock is a shared application infrastructure.
+        // This can be overridden by the application if desired,
+        // in which case the runtime will use the overridden clock.
+        // This is not keyed because the clock is not runtime-specific.
+        services.TryAddSingleton(TimeProvider.System);
+
+        // Enable logging, the configuration for this is inherited from the application's configuration
+        services.AddLogging();
+
+        // The schedule provider that fetches recurring schedules and evaluates the next execution for this runtime.
+        services.AddKeyedScoped<IBackgroundJobScheduleProvider, TProvider>(instanceId);
+
+        // The in-memory queue for background job execution.
+        services.AddKeyedSingleton<InMemoryBackgroundJobExecutionQueue>(instanceId, (_, _) =>
+            new InMemoryBackgroundJobExecutionQueue(options.ExecutionQueueCapacity)
+        );
+
+        // The signal that wakes up the scheduler when a new schedule is added.
+        services.AddKeyedSingleton<SchedulerSignal>(instanceId, (_, _) => new SchedulerSignal());
+
+        // The registry that tracks the jobs registered in this runtime.
+        services.AddKeyedSingleton<BackgroundJobScheduler>(instanceId, (provider, _) =>
+            new BackgroundJobScheduler(
+                instanceId,
+                provider.GetRequiredService<IServiceScopeFactory>(),
+                provider.GetRequiredKeyedService<InMemoryBackgroundJobExecutionQueue>(instanceId),
+                provider.GetRequiredKeyedService<SchedulerSignal>(instanceId),
+                provider.GetRequiredService<TimeProvider>()
+            )
+        );
+        // To expose key management endpoint like triggering a job or refreshing the schedule
+        services.AddKeyedSingleton<IBackgroundJobScheduler>(instanceId, (provider, _) =>
+            provider.GetRequiredKeyedService<BackgroundJobScheduler>(instanceId)
+        );
+
+        // The dispatcher that consumes the execution queue and runs jobs.
+        services.AddKeyedSingleton<BackgroundJobDispatcher>(instanceId, (provider, _) =>
+            new BackgroundJobDispatcher(
+                instanceId,
+                provider.GetRequiredKeyedService<ScheduliteOptions>(instanceId),
+                provider.GetRequiredService<IServiceScopeFactory>(),
+                provider.GetRequiredKeyedService<InMemoryBackgroundJobExecutionQueue>(instanceId),
+                provider.GetRequiredService<ILogger<BackgroundJobDispatcher>>()
+            )
+        );
+
+        // IHostedService is unkeyed because the host discovers services through this framework interface.
+        services.AddSingleton<IHostedService>(provider =>
+            new ScheduliteHostedService(
+                provider.GetRequiredKeyedService<BackgroundJobScheduler>(instanceId),
+                provider.GetRequiredKeyedService<BackgroundJobDispatcher>(instanceId)
+            )
+        );
+
+        return services;
+    }
+
+    private static IServiceCollection AddScheduliteJobCore<TJob>(IServiceCollection services, string? instanceId, string jobId) where TJob : class, IBackgroundJob
+    {
+        var jobType = typeof(TJob);
+        if (jobType.IsAbstract || jobType.ContainsGenericParameters)
         {
-            ArgumentNullException.ThrowIfNull(services);
-            ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
-
-            // register the job type as transient, so that a new instance is created for each execution
-            services.TryAddTransient<TJob>();
-            // register the job in the registry
-            services.AddSingleton(new BackgroundJobRegistration(jobId, typeof(TJob)));
-
-            return services;
+            throw new ArgumentException($"Background job type '{jobType.FullName}' must be a closed, concrete type.", nameof(TJob));
         }
+        if (string.IsNullOrWhiteSpace(jobId))
+        {
+            throw new ArgumentException("Job ID cannot be null, empty, or whitespace.", nameof(jobId));
+        }
+
+        services.TryAddKeyedTransient<IBackgroundJob, TJob>((instanceId, jobId));
+        return services;
     }
 }

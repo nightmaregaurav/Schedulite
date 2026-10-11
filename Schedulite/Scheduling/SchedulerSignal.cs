@@ -1,36 +1,31 @@
+using System.Threading.Channels;
+
 namespace Schedulite.Scheduling;
 
-/// <summary>Wakes the scheduler when runtime state may need to be reloaded.</summary>
+/// <summary>Wakes the scheduler when the runtime state may need to be reloaded.</summary>
 internal sealed class SchedulerSignal
 {
-    private readonly Lock _syncRoot = new();
-    private TaskCompletionSource<bool> _signal = CreateSignal();
+    // A capacity-one channel coalesces repeated requests and preserves a request
+    // raised between scheduler waits until the scheduler consumes it.
+    private readonly Channel<bool> _signals = Channel.CreateBounded<bool>(
+        new BoundedChannelOptions(1)
+        {
+            FullMode = BoundedChannelFullMode.DropWrite,
+            SingleReader = true,
+            SingleWriter = false,
+            AllowSynchronousContinuations = false
+        }
+    );
 
-    /// <summary>Completes the current signal to wake a waiting scheduler.</summary>
+    /// <summary>Queues one reload signal, coalescing it with any signal not yet consumed.</summary>
     public void Signal()
     {
-        lock (_syncRoot)
-        {
-            _signal.TrySetResult(true);
-        }
+        _signals.Writer.TryWrite(true);
     }
 
-    /// <summary>Waits for a signal, honoring cancellation, then prepares the next signal.</summary>
-    public Task WaitAsync(CancellationToken cancellationToken)
+    /// <summary>Waits for and consumes a reload signal, honoring cancellation.</summary>
+    public async Task WaitAsync(CancellationToken cancellationToken)
     {
-        lock (_syncRoot)
-        {
-            if (_signal.Task.IsCompleted)
-            {
-                _signal = CreateSignal();
-            }
-            return _signal.Task.WaitAsync(cancellationToken);
-        }
-    }
-
-    /// <summary>Creates a signal task source that runs continuations asynchronously.</summary>
-    private static TaskCompletionSource<bool> CreateSignal()
-    {
-        return new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _ = await _signals.Reader.ReadAsync(cancellationToken);
     }
 }

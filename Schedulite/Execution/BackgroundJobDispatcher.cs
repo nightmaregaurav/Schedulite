@@ -1,35 +1,45 @@
 using System.Collections.Concurrent;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Schedulite.Abstractions;
+using Schedulite.Configuration;
 
 namespace Schedulite.Execution;
 
 /// <summary>Dispatches queued job requests while limiting concurrent executions.</summary>
 internal sealed class BackgroundJobDispatcher
 {
-    /// <summary>Gets the queue from which execution requests are read.</summary>
-    private readonly IBackgroundJobExecutionQueue _queue;
-    /// <summary>Gets the resolver used to create scoped job instances.</summary>
-    private readonly BackgroundJobResolver _resolver;
-    /// <summary>Gets the semaphore that limits simultaneous job executions.</summary>
+    // The schedulite instance Id, used to resolve keyed services
+    private readonly string? _instanceId;
+    // The service scope factory, used to create a new scope for each job execution
+    private readonly IServiceScopeFactory _scopeFactory;
+    // The queue of job execution requests to read requests from. It's populated by the BackgroundJobScheduler.
+    private readonly InMemoryBackgroundJobExecutionQueue _queue;
+    // The logger, used to log errors and information about job executions
+    private readonly ILogger<BackgroundJobDispatcher> _logger;
+    // The semaphore that limits the number of concurrent executions per schedulite instance. It's initialized with the maximum concurrency from the options.
     private readonly SemaphoreSlim _concurrencyLimiter;
-    /// <summary>Gets the keyed lock that prevents overlapping executions of the same job or subject as needed.</summary>
+    // The keyed execution lock, used to limit concurrent executions of the same job or subject based on the job's concurrency rule
     private readonly KeyedExecutionLock _executionLock = new();
-    /// <summary>Gets the dictionary of currently active executions, keyed by execution ID.</summary>
+    // The dictionary of active executions, used to track the tasks of currently executing jobs and wait for them to finish on shutdown
     private readonly ConcurrentDictionary<Guid, Task> _activeExecutions = new();
 
-    public BackgroundJobDispatcher(IBackgroundJobExecutionQueue queue, BackgroundJobResolver resolver, int maxConcurrency)
+    public BackgroundJobDispatcher(string? instanceId, ScheduliteOptions options, IServiceScopeFactory scopeFactory, InMemoryBackgroundJobExecutionQueue queue, ILogger<BackgroundJobDispatcher> logger)
     {
+        ArgumentNullException.ThrowIfNull(scopeFactory);
         ArgumentNullException.ThrowIfNull(queue);
-        ArgumentNullException.ThrowIfNull(resolver);
+        ArgumentNullException.ThrowIfNull(logger);
 
-        if (maxConcurrency <= 0)
+        if (options.MaxConcurrency <= 0)
         {
-            throw new ArgumentOutOfRangeException(nameof(maxConcurrency), maxConcurrency, "The maximum concurrency must be greater than zero.");
+            throw new ArgumentOutOfRangeException(nameof(options.MaxConcurrency), options.MaxConcurrency, "The maximum concurrency must be greater than zero.");
         }
 
+        _instanceId = instanceId;
+        _scopeFactory = scopeFactory;
         _queue = queue;
-        _resolver = resolver;
-        _concurrencyLimiter = new SemaphoreSlim(maxConcurrency, maxConcurrency);
+        _logger = logger;
+        _concurrencyLimiter = new SemaphoreSlim(options.MaxConcurrency, options.MaxConcurrency);
     }
 
     /// <summary>Consumes queued requests until cancellation and waits for active executions to finish.</summary>
@@ -39,6 +49,7 @@ internal sealed class BackgroundJobDispatcher
         {
             await foreach (var request in _queue.ReadAllAsync(cancellationToken))
             {
+                // A slot is held for the whole request, including time spent waiting for a per-job lock.
                 await _concurrencyLimiter.WaitAsync(cancellationToken);
 
                 var executionTask = ExecuteAndReleaseAsync(request, cancellationToken);
@@ -58,6 +69,7 @@ internal sealed class BackgroundJobDispatcher
         }
         finally
         {
+            // Make sure all active executions are completed gracefully
             var executions = _activeExecutions.Values.ToArray();
             await Task.WhenAll(executions);
         }
@@ -70,10 +82,19 @@ internal sealed class BackgroundJobDispatcher
         {
             await ExecuteAsync(request, cancellationToken);
         }
-        catch (Exception)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            // Execution failures are isolated from the dispatcher.
-            // An execution observer can be added later if desired.
+            // Normal runtime shutdown.
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(
+                exception,
+                "Execution {ExecutionId} of job {JobId} in Schedulite instance {InstanceId} failed.",
+                request.ExecutionId,
+                request.JobId,
+                _instanceId
+            );
         }
         finally
         {
@@ -81,112 +102,35 @@ internal sealed class BackgroundJobDispatcher
         }
     }
 
-    /// <summary>Coordinates scheduler and dispatcher lifetimes until shutdown.</summary>
+    /// <summary>Resolves a job, applies its concurrency rule, and executes it in a dependency-injection scope.</summary>
     private async Task ExecuteAsync(BackgroundJobExecutionRequest request, CancellationToken cancellationToken)
     {
-        await using var lease = await _resolver.ResolveAsync(request.JobId, cancellationToken);
-        var scope = lease.Job.ConcurrencyScope;
-        ExecutionLockKey? lockKey;
-        if (scope == ExecutionConcurrencyScope.Unrestricted)
+        await using var scope = _scopeFactory.CreateAsyncScope();
+        var job = scope.ServiceProvider.GetKeyedService<IBackgroundJob>((_instanceId, request.JobId));
+        if (job == null)
         {
-            lockKey = null;
+            throw new InvalidOperationException($"Job '{request.JobId}' is not registered for {nameof(Schedulite)} instance '{_instanceId}'");
         }
-        else if (scope == ExecutionConcurrencyScope.PerJob)
+
+        var lockKey = job.ConcurrencyScope switch
         {
-            lockKey = new ExecutionLockKey(request.JobId, null);
-        }
-        else if (scope == ExecutionConcurrencyScope.PerSubject)
-        {
-            lockKey = new ExecutionLockKey(request.JobId, request.SubjectId);
-        }
-        else
-        {
-            throw new InvalidOperationException($"Background job '{request.JobId}' has an unsupported concurrency scope '{scope}'.");
-        }
+            ExecutionConcurrencyScope.Unrestricted => (ExecutionLockKey?)null,
+            ExecutionConcurrencyScope.PerJob => new ExecutionLockKey(request.JobId, null),
+            ExecutionConcurrencyScope.PerSubject => new ExecutionLockKey(request.JobId, request.SubjectId),
+            _ => throw new InvalidOperationException($"Background job '{request.JobId}' has an unsupported concurrency scope '{job.ConcurrencyScope}'.")
+        };
 
         using var executionLock = lockKey is null ? null : await _executionLock.AcquireAsync(lockKey.Value, cancellationToken);
 
         var context = new BackgroundJobContext
         {
             ExecutionId = request.ExecutionId,
+            InstanceId = _instanceId,
             JobId = request.JobId,
             SubjectId = request.SubjectId,
             ScheduleId = request.ScheduleId,
             Trigger = request.Trigger
         };
-        await lease.Job.ExecuteAsync(context, cancellationToken);
-    }
-
-    private readonly record struct ExecutionLockKey(string JobId, string? SubjectId);
-
-    /// <summary>Provides per-key asynchronous locks and removes idle keys to bound memory use.</summary>
-    private sealed class KeyedExecutionLock
-    {
-        private readonly Lock _gate = new();
-        private readonly Dictionary<ExecutionLockKey, LockEntry> _entries = new();
-
-        public async ValueTask<IDisposable> AcquireAsync(ExecutionLockKey key, CancellationToken cancellationToken)
-        {
-            LockEntry entry;
-            lock (_gate)
-            {
-                if (!_entries.TryGetValue(key, out entry!))
-                {
-                    entry = new LockEntry();
-                    _entries.Add(key, entry);
-                }
-
-                entry.References++;
-            }
-
-            try
-            {
-                await entry.Semaphore.WaitAsync(cancellationToken);
-                return new Releaser(this, key, entry);
-            }
-            catch
-            {
-                ReleaseReference(key, entry);
-                throw;
-            }
-        }
-
-        private void Release(ExecutionLockKey key, LockEntry entry)
-        {
-            entry.Semaphore.Release();
-            ReleaseReference(key, entry);
-        }
-
-        private void ReleaseReference(ExecutionLockKey key, LockEntry entry)
-        {
-            lock (_gate)
-            {
-                entry.References--;
-                if (entry.References == 0)
-                {
-                    _entries.Remove(key);
-                    entry.Semaphore.Dispose();
-                }
-            }
-        }
-
-        private sealed class LockEntry
-        {
-            public SemaphoreSlim Semaphore { get; } = new(1, 1);
-            public int References { get; set; }
-        }
-
-        private sealed class Releaser(KeyedExecutionLock owner, ExecutionLockKey key, LockEntry entry) : IDisposable
-        {
-            private int _released;
-
-            public void Dispose()
-            {
-                if (Interlocked.Exchange(ref _released, 1) == 0)
-                {
-                    owner.Release(key, entry);
-                }
-            }
-        }
+        await job.ExecuteAsync(context, cancellationToken);
     }
 }

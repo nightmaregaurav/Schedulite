@@ -3,9 +3,8 @@ using System.Threading.Channels;
 namespace Schedulite.Execution;
 
 /// <summary>Buffers execution requests in a bounded in-memory channel.</summary>
-internal sealed class InMemoryBackgroundJobExecutionQueue : IBackgroundJobExecutionQueue
+internal sealed class InMemoryBackgroundJobExecutionQueue
 {
-    /// <summary>Gets the bounded channel that stores pending execution requests.</summary>
     private readonly Channel<BackgroundJobExecutionRequest> _channel;
 
     public InMemoryBackgroundJobExecutionQueue(int capacity)
@@ -19,7 +18,7 @@ internal sealed class InMemoryBackgroundJobExecutionQueue : IBackgroundJobExecut
             new BoundedChannelOptions(capacity)
             {
                 FullMode = BoundedChannelFullMode.Wait,
-                SingleReader = false,
+                SingleReader = true,
                 SingleWriter = false,
                 AllowSynchronousContinuations = false
             }

@@ -25,11 +25,17 @@
 
     <ItemGroup>
         <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.12" />
+        <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.12" />
     </ItemGroup>
 
     <ItemGroup>
         <None Include="..\LICENSE" Pack="true" PackagePath="\" />
         <None Include="..\README.md" Pack="true" PackagePath="\" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <Compile Remove="Execution\BackgroundJobLease.cs" />
+      <Compile Remove="Execution\BackgroundJobResolver.cs" />
     </ItemGroup>
 
 </Project>
