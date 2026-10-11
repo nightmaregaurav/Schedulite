@@ -8,6 +8,12 @@ public interface IScheduliteManager
     /// <returns>The runtimes and their jobs, grouped by runtime.</returns>
     public Task<IReadOnlyCollection<ScheduliteRuntimeInfo>> ListAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>Lists every runtime with its registered jobs and currently configured schedules.</summary>
+    /// <param name="instanceId">The runtime ID, or <see langword="null"/> for the default runtime.</param>
+    /// <param name="cancellationToken">A token that requests cancellation of provider calls.</param>
+    /// <returns>The runtimes and their jobs, grouped by runtime.</returns>
+    public Task<IReadOnlyCollection<ScheduliteRuntimeInfo>> ListAsync(string? instanceId, CancellationToken cancellationToken = default);
+
     /// <summary>Queues a manual execution on the specified runtime.</summary>
     /// <param name="instanceId">The runtime ID, or <see langword="null"/> for the default runtime.</param>
     /// <param name="jobId">The identifier used to register the job in that runtime.</param>

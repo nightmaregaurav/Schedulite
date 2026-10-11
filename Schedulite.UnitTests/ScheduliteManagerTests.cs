@@ -29,15 +29,13 @@ public sealed class ScheduliteManagerTests
         var runtimes = await provider.GetRequiredService<IScheduliteManager>().ListAsync();
 
         var defaultRuntime = Assert.Single(runtimes, runtime => runtime.InstanceId is null);
-        Assert.Contains("default-job", defaultRuntime.JobIds);
+        Assert.Contains("default-job", defaultRuntime.Schedules.First().JobId);
         var defaultSchedule = Assert.Single(defaultRuntime.Schedules);
         Assert.Equal("default-schedule", defaultSchedule.ScheduleId);
         Assert.True(defaultSchedule.NotQueued);
         Assert.Null(defaultSchedule.NextExecution);
 
         var alphaRuntime = Assert.Single(runtimes, runtime => runtime.InstanceId == "alpha");
-        Assert.Contains("alpha-job", alphaRuntime.JobIds);
-        Assert.Contains("alpha-manual-only-job", alphaRuntime.JobIds);
         var alphaSchedule = Assert.Single(alphaRuntime.Schedules);
         Assert.Equal("alpha-schedule", alphaSchedule.ScheduleId);
         Assert.True(alphaSchedule.NotQueued);

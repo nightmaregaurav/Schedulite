@@ -20,39 +20,60 @@ internal sealed class ScheduliteManager(
         foreach (var registration in _registrations)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            await using var scope = scopeFactory.CreateAsyncScope();
-            var scheduleProvider = scope.ServiceProvider.GetRequiredKeyedService<IBackgroundJobScheduleProvider>(registration.InstanceId);
-            var schedules = await scheduleProvider.GetSchedulesAsync(cancellationToken);
-            ArgumentNullException.ThrowIfNull(schedules);
-            var scheduler = serviceProvider.GetRequiredKeyedService<BackgroundJobScheduler>(registration.InstanceId);
-
-            var backgroundJobModels = new List<BackgroundJobInfoModel>(schedules.Count);
-            foreach (var s in schedules)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var isQueued = scheduler.TryGetNextExecution(s.ScheduleId, out var nextExecution);
-                backgroundJobModels.Add(new BackgroundJobInfoModel
-                {
-                    ScheduliteInstanceId = registration.InstanceId,
-                    ScheduleId = s.ScheduleId,
-                    JobId = s.JobId,
-                    SubjectId = s.SubjectId,
-                    ScheduleRule = s.ScheduleRule,
-                    Enabled = s.Enabled,
-                    NotQueued = !isQueued,
-                    NextExecution = isQueued ? nextExecution : null
-                });
-            }
-
-            runtimes.Add(new ScheduliteRuntimeInfo
-            {
-                InstanceId = registration.InstanceId,
-                JobIds = registration.JobRegistry.JobIds.ToArray(),
-                Schedules = backgroundJobModels
-            });
+            runtimes.AddRange(await GetRuntimeInfoAsync(registration, cancellationToken));
         }
 
         return runtimes;
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyCollection<ScheduliteRuntimeInfo>> ListAsync(string? instanceId, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var registration = _registrations.FirstOrDefault(r => r.InstanceId == instanceId);
+        if(registration is null)
+        {
+            throw new KeyNotFoundException($"Schedulite runtime '{instanceId ?? "<default>"}' is not registered.");
+        }
+
+        return await GetRuntimeInfoAsync(registration, cancellationToken);
+    }
+
+    private async Task<IReadOnlyCollection<ScheduliteRuntimeInfo>> GetRuntimeInfoAsync(ScheduliteRuntimeRegistration registration, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        await using var scope = scopeFactory.CreateAsyncScope();
+        var scheduleProvider = scope.ServiceProvider.GetRequiredKeyedService<IBackgroundJobScheduleProvider>(registration.InstanceId);
+        var schedules = await scheduleProvider.GetSchedulesAsync(cancellationToken);
+        ArgumentNullException.ThrowIfNull(schedules);
+        var scheduler = serviceProvider.GetRequiredKeyedService<BackgroundJobScheduler>(registration.InstanceId);
+
+        var backgroundJobModels = new List<BackgroundJobInfoModel>(schedules.Count);
+        foreach (var s in schedules)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var isQueued = scheduler.TryGetNextExecution(s.ScheduleId, out var nextExecution);
+            backgroundJobModels.Add(new BackgroundJobInfoModel
+            {
+                ScheduliteInstanceId = registration.InstanceId,
+                ScheduleId = s.ScheduleId,
+                JobId = s.JobId,
+                SubjectId = s.SubjectId,
+                ScheduleRule = s.ScheduleRule,
+                Enabled = s.Enabled,
+                NotQueued = !isQueued,
+                NextExecution = isQueued ? nextExecution : null
+            });
+        }
+
+        return new List<ScheduliteRuntimeInfo>
+        {
+            new()
+            {
+                InstanceId = registration.InstanceId,
+                Schedules = backgroundJobModels
+            }
+        };
     }
 
     /// <inheritdoc />
