@@ -1,6 +1,6 @@
 using Schedulite.Abstractions;
 
-namespace Schedulite.Example.BackgroundJobs;
+namespace Schedulite.Example.BackgroundJobs.Providers;
 
 public sealed class ExampleScheduleProvider : IBackgroundJobScheduleProvider
 {

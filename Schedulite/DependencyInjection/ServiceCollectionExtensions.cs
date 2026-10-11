@@ -77,6 +77,7 @@ public static class ServiceCollectionExtensions
     /// <returns>The same service collection, for chaining.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="services"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException"><paramref name="jobId"/> is blank or already registered, or <typeparamref name="TJob"/> is abstract or open generic.</exception>
+    /// <exception cref="InvalidOperationException">The default runtime has not been registered.</exception>
     public static IServiceCollection AddScheduliteJob<TJob>(this IServiceCollection services, string jobId) where TJob : class, IBackgroundJob
     {
         ArgumentNullException.ThrowIfNull(services);
@@ -91,6 +92,7 @@ public static class ServiceCollectionExtensions
     /// <returns>The same service collection, for chaining.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="services"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException"><paramref name="instanceId"/> or <paramref name="jobId"/> is blank, the job ID is already registered in that runtime, or <typeparamref name="TJob"/> is abstract or open generic.</exception>
+    /// <exception cref="InvalidOperationException">The named runtime has not been registered.</exception>
     public static IServiceCollection AddScheduliteJob<TJob>(this IServiceCollection services, string instanceId, string jobId) where TJob : class, IBackgroundJob
     {
         ArgumentNullException.ThrowIfNull(services);
@@ -100,21 +102,24 @@ public static class ServiceCollectionExtensions
 
     private static IServiceCollection AddScheduliteCore<TProvider>(IServiceCollection services, string? instanceId, ScheduliteOptions options) where TProvider : class, IBackgroundJobScheduleProvider
     {
-        // Every runtime exposes one keyed scheduler, so check for duplicates before registering any keyed services.
+        // The registry is the runtime marker; check it before adding any of this runtime's services.
         if (services
             .Any(descriptor =>
-                descriptor.ServiceType == typeof(IBackgroundJobScheduler) &&
-                descriptor.IsKeyedService &&
-                Equals(descriptor.ServiceKey, instanceId)
+                descriptor.ServiceType == typeof(BackgroundJobRegistry) &&
+                (descriptor.IsKeyedService ? Equals(descriptor.ServiceKey, instanceId) : instanceId is null)
             )
         ) {
             throw new ArgumentException($"A Schedulite runtime with ID '{instanceId ?? "<null>"}' is already registered.", nameof(instanceId));
         }
 
         // prepare the option object and validate it before registering any runtime services
+        ArgumentNullException.ThrowIfNull(options);
         options.Validate();
         // inject the option object as singleton so it can be accessed later
         services.AddKeyedSingleton(instanceId, options);
+
+        // Keep the runtime's registered IDs independently from job construction so manual triggers can be validated eagerly.
+        services.AddKeyedSingleton(instanceId, new BackgroundJobRegistry());
 
         // The clock is a shared application infrastructure.
         // This can be overridden by the application if desired,
@@ -129,8 +134,12 @@ public static class ServiceCollectionExtensions
         services.AddKeyedScoped<IBackgroundJobScheduleProvider, TProvider>(instanceId);
 
         // The in-memory queue for background job execution.
-        services.AddKeyedSingleton<InMemoryBackgroundJobExecutionQueue>(instanceId, (_, _) =>
-            new InMemoryBackgroundJobExecutionQueue(options.ExecutionQueueCapacity)
+        services.AddKeyedSingleton<InMemoryBackgroundJobExecutionQueue>(instanceId, (provider, _) =>
+            new InMemoryBackgroundJobExecutionQueue(
+                instanceId,
+                options.ExecutionQueueCapacity,
+                provider.GetRequiredService<ILogger<InMemoryBackgroundJobExecutionQueue>>()
+            )
         );
 
         // The signal that wakes up the scheduler when a new schedule is added.
@@ -143,7 +152,9 @@ public static class ServiceCollectionExtensions
                 provider.GetRequiredService<IServiceScopeFactory>(),
                 provider.GetRequiredKeyedService<InMemoryBackgroundJobExecutionQueue>(instanceId),
                 provider.GetRequiredKeyedService<SchedulerSignal>(instanceId),
-                provider.GetRequiredService<TimeProvider>()
+                provider.GetRequiredService<TimeProvider>(),
+                provider.GetRequiredKeyedService<BackgroundJobRegistry>(instanceId),
+                provider.GetRequiredService<ILogger<BackgroundJobScheduler>>()
             )
         );
         // To expose key management endpoint like triggering a job or refreshing the schedule
@@ -165,8 +176,10 @@ public static class ServiceCollectionExtensions
         // IHostedService is unkeyed because the host discovers services through this framework interface.
         services.AddSingleton<IHostedService>(provider =>
             new ScheduliteHostedService(
+                instanceId,
                 provider.GetRequiredKeyedService<BackgroundJobScheduler>(instanceId),
-                provider.GetRequiredKeyedService<BackgroundJobDispatcher>(instanceId)
+                provider.GetRequiredKeyedService<BackgroundJobDispatcher>(instanceId),
+                provider.GetRequiredService<ILogger<ScheduliteHostedService>>()
             )
         );
 
@@ -185,7 +198,23 @@ public static class ServiceCollectionExtensions
             throw new ArgumentException("Job ID cannot be null, empty, or whitespace.", nameof(jobId));
         }
 
-        services.TryAddKeyedTransient<IBackgroundJob, TJob>((instanceId, jobId));
+        var registryDescriptor = services.FirstOrDefault(descriptor =>
+            descriptor.ServiceType == typeof(BackgroundJobRegistry) &&
+            (descriptor.IsKeyedService ? Equals(descriptor.ServiceKey, instanceId) : instanceId is null)
+        );
+        var registryInstance = registryDescriptor is null
+            ? null
+            : registryDescriptor.IsKeyedService
+                ? registryDescriptor.KeyedImplementationInstance
+                : registryDescriptor.ImplementationInstance;
+        if (registryInstance is not BackgroundJobRegistry registry)
+        {
+            throw new InvalidOperationException($"Register the Schedulite runtime '{instanceId ?? "<default>"}' before registering its jobs.");
+        }
+
+        registry.Register(jobId);
+        services.TryAddKeyedTransient<TJob>(instanceId);
+        services.AddKeyedTransient<IBackgroundJob>((instanceId, jobId), (provider, _) => provider.GetRequiredKeyedService<TJob>(instanceId));
         return services;
     }
 }

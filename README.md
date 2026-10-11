@@ -23,11 +23,12 @@ Register the scheduler and one or more jobs in `Program.cs`:
 
 ```csharp
 using Schedulite.DependencyInjection;
+using Schedulite.Configuration;
 
-builder.Services.AddSchedulite<MyScheduleProvider>(options =>
+builder.Services.AddSchedulite<MyScheduleProvider>(new ScheduliteOptions
 {
-    options.MaxConcurrency = 4;
-    options.ExecutionQueueCapacity = 100;
+    MaxConcurrency = 4,
+    ExecutionQueueCapacity = 100
 });
 
 builder.Services.AddScheduliteJob<SendReminderJob>("send-reminder");
@@ -38,9 +39,9 @@ builder.Services.AddScheduliteJob<SendReminderJob>("send-reminder");
 An application can register multiple isolated runtimes. Each runtime has its own schedule provider, registered job IDs, options, in-memory queue, concurrency limit, and hosted service. Job and schedule IDs are case-sensitive and scoped to their runtime, so the same job ID can be used by different runtimes.
 
 ```csharp
-builder.Services.AddSchedulite<BillingScheduleProvider>("billing", options =>
+builder.Services.AddSchedulite<BillingScheduleProvider>("billing", new ScheduliteOptions
 {
-    options.MaxConcurrency = 2;
+    MaxConcurrency = 2
 });
 builder.Services.AddScheduliteJob<InvoiceJob>("billing", "process");
 
@@ -69,9 +70,10 @@ public sealed class BillingController(
 Implement a job with `IBackgroundJob`:
 
 ```csharp
+using Microsoft.Extensions.Logging;
 using Schedulite.Abstractions;
 
-public sealed class SendReminderJob : IBackgroundJob
+public sealed class SendReminderJob(ILogger<SendReminderJob> logger) : IBackgroundJob
 {
     public string JobName => "Send reminder";
     public string JobDescription => "Sends a reminder for a subject.";
@@ -80,7 +82,10 @@ public sealed class SendReminderJob : IBackgroundJob
         BackgroundJobContext context,
         CancellationToken cancellationToken)
     {
-        Console.WriteLine($"Sending a reminder for {context.SubjectId}.");
+        logger.LogInformation(
+            "Sending a reminder for {SubjectId} in execution {ExecutionId}.",
+            context.SubjectId,
+            context.ExecutionId);
         return Task.CompletedTask;
     }
 }
@@ -184,11 +189,11 @@ After updating the data used by `IBackgroundJobScheduleProvider`, call `ReloadSc
 await scheduler.ReloadSchedulesAsync(cancellationToken);
 ```
 
-Each execution receives a `BackgroundJobContext` containing an execution ID, job ID, subject ID, optional schedule ID, and whether the trigger was manual or scheduled. Jobs should honor the cancellation token.
+Jobs do not need a recurring schedule to be useful. Register an on-demand job such as `SendDigestJob` and call `TriggerAsync` from an API endpoint, message consumer, or application service. Each execution receives a `BackgroundJobContext` containing an execution ID, runtime ID, job ID, subject ID, optional schedule ID, and whether the trigger was manual or scheduled. Jobs should honor the cancellation token.
 
 ## Runtime guarantees and limits
 
-Each runtime uses a bounded, in-memory execution queue. Queued work is lost if the process exits before dispatch, and Schedulite does not persist execution state, retry failed jobs, or claim work across application replicas. Job failures are logged through `Microsoft.Extensions.Logging` when the application has logging configured; the dispatcher continues with later executions. Each replica schedules independently, so deploying multiple replicas can run the same schedule more than once. The concurrency scopes coordinate executions only within one runtime in one process. After 1,000 missed occurrences, Schedulite asks the provider to jump to the next occurrence after the current time to bound catch-up work; relative interval rules may rebase after a long outage. Use an application-owned durable queue and distributed coordination when jobs require persistence, retries, or cross-replica uniqueness.
+Each runtime uses a bounded, in-memory execution queue. Queued work is lost if the process exits before dispatch, and Schedulite does not persist execution state, retry failed jobs, or claim work across application replicas. Schedulite logs runtime lifecycle, schedule reloads, queue pressure, job start/completion, and failures through `Microsoft.Extensions.Logging`; the dispatcher continues with later executions after a job failure. Each replica schedules independently, so deploying multiple replicas can run the same schedule more than once. The concurrency scopes coordinate executions only within one runtime in one process. After 1,000 missed occurrences, Schedulite asks the provider to jump to the next occurrence after the current time to bound catch-up work; relative interval rules may rebase after a long outage. Use an application-owned durable queue and distributed coordination when jobs require persistence, retries, or cross-replica uniqueness.
 
 This implementation provides in-process best-effort scheduling; it does not promise at-least-once or exactly-once job delivery.
 
@@ -201,15 +206,41 @@ This implementation provides in-process best-effort scheduling; it does not prom
 
 Both values must be greater than zero.
 
-## Example application
+Use the `Schedulite` logging category to control the runtime's diagnostic detail. `Information` reports lifecycle and execution events, `Debug` adds schedule and queue details, and `Trace` includes scheduler wait activity. Queue backpressure, long lock waits, and catch-up fast-forwards are warnings; job failures are errors.
 
-The [`Schedulite.Example`](https://github.com/nightmaregaurav/Schedulite/tree/main/Schedulite.Example) project is a runnable ASP.NET Core application showing dependency injection, multiple jobs, schedule-provider rules, manual triggering, and an API endpoint for inspecting schedules. Its trigger endpoint is intentionally a local demo and has no authentication configured; secure it before exposing it publicly. It is the best starting point for a complete integration:
-
-```bash
-dotnet run --project Schedulite.Example
+```json
+{
+  "Logging": {
+    "LogLevel": {
+      "Schedulite": "Debug"
+    }
+  }
+}
 ```
 
-The example uses deterministic schedule IDs and demonstrates application-owned schedule rules such as `every-minute` and `every-2-minute`.
+## Example application
+
+The [`Schedulite.Example`](https://github.com/nightmaregaurav/Schedulite/tree/main/Schedulite.Example) project is a runnable ASP.NET Core application showing recurring tenant schedules, disabled schedules, manual-only jobs, schedule reloads, per-job and per-subject concurrency, and a separate named maintenance runtime. It includes endpoints for inspecting schedules and triggering work. The demo endpoints have no authentication configured; secure them before exposing them publicly:
+
+```bash
+dotnet run --project Schedulite.Example --launch-profile http
+```
+
+Useful requests after starting the example:
+
+```bash
+# Trigger work that has no recurring schedule.
+curl -X POST 'http://localhost:5055/api/background-jobs/trigger/send-digest?subjectId=tenant-1'
+
+# Ask the default runtime to reload application-owned schedules.
+curl -X POST 'http://localhost:5055/api/background-jobs/reload'
+
+# Inspect and trigger work in the isolated maintenance runtime.
+curl 'http://localhost:5055/api/maintenance-jobs'
+curl -X POST 'http://localhost:5055/api/maintenance-jobs/trigger/cleanup-expired-data?subjectId=tenant-1'
+```
+
+The example uses deterministic schedule IDs and application-owned rule strings; replace the in-memory schedule providers with your database or configuration-backed implementation when adapting it.
 
 ## License
 

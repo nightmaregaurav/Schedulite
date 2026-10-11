@@ -6,7 +6,7 @@
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <PackageId>nightmaregaurav.schedulite</PackageId>
-        <VersionPrefix>1.0.0</VersionPrefix>
+        <VersionPrefix>2.0.0</VersionPrefix>
         <Description>A lightweight and flexible scheduling library for .NET applications.</Description>
         <Authors>Gaurav Nyaupane</Authors>
         <Owners>nightmaregaurav</Owners>

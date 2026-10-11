@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Schedulite.Abstractions;
 using Schedulite.Execution;
 
@@ -10,7 +11,9 @@ internal sealed class BackgroundJobScheduler(
     IServiceScopeFactory scopeFactory,
     InMemoryBackgroundJobExecutionQueue executionQueue,
     SchedulerSignal signal,
-    TimeProvider timeProvider
+    TimeProvider timeProvider,
+    BackgroundJobRegistry jobRegistry,
+    ILogger<BackgroundJobScheduler> logger
 ) : IBackgroundJobScheduler {
     // If the schedule is too far in the future, the timer provider may not be able to wait that long.
     // So we limit the wait to a week and then re-evaluate the next occurrence.
@@ -18,7 +21,7 @@ internal sealed class BackgroundJobScheduler(
 
     // If a schedule is far behind, we don't want to walk through all of missed occurrences.
     // Instead, we ask the provider to jump to the first occurrence after now if we have walked too many.
-    private const int MaximumMissedOccurrencesToWalk = 100;
+    private const int MaximumMissedOccurrencesToWalk = 1_000;
 
     // The execution schedule dictionary is keyed by schedule ID and contains the next occurrence for each active schedule.
     private readonly Dictionary<string, ExecutionSchedule> _schedules = new(StringComparer.Ordinal);
@@ -26,37 +29,52 @@ internal sealed class BackgroundJobScheduler(
     /// <summary>Consumes queued requests until cancellation and waits for active executions to finish.</summary>
     public async Task RunAsync(CancellationToken cancellationToken)
     {
-        await ReloadAsync(cancellationToken);
-        while (true)
+        logger.LogInformation("Starting schedule polling for Schedulite runtime {InstanceId}.", instanceId);
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            var now = timeProvider.GetUtcNow();
-            await ExecuteDueSchedulesAsync(now, cancellationToken);
-
-            var nextExecution = GetNextExecution(cancellationToken);
-
-            if (nextExecution is null)
+            await ReloadAsync(cancellationToken);
+            while (true)
             {
-                await signal.WaitAsync(cancellationToken);
-                await ReloadAsync(cancellationToken);
-                continue;
-            }
+                cancellationToken.ThrowIfCancellationRequested();
 
-            var delay = nextExecution.Value - now;
-            if (delay <= TimeSpan.Zero)
-            {
-                continue;
-            }
+                var now = timeProvider.GetUtcNow();
+                await ExecuteDueSchedulesAsync(now, cancellationToken);
 
-            var reloadRequested = await WaitForNextEventAsync(delay, cancellationToken);
+                var nextExecution = GetNextExecution(cancellationToken);
 
-            if (reloadRequested)
-            {
-                await ReloadAsync(cancellationToken);
+                if (nextExecution is null)
+                {
+                    logger.LogTrace("No scheduled executions are pending in Schedulite runtime {InstanceId}; waiting for a reload request.", instanceId);
+                    await signal.WaitAsync(cancellationToken);
+                    await ReloadAsync(cancellationToken);
+                    continue;
+                }
+
+                var delay = nextExecution.Value - now;
+                if (delay <= TimeSpan.Zero)
+                {
+                    logger.LogTrace("Schedule polling will immediately recheck due executions in Schedulite runtime {InstanceId}.", instanceId);
+                    continue;
+                }
+
+                logger.LogTrace(
+                    "Next scheduled execution in Schedulite runtime {InstanceId} is at {NextExecutionUtc}; waiting for {Delay} or a reload request.",
+                    instanceId,
+                    nextExecution,
+                    delay
+                );
+                var reloadRequested = await WaitForNextEventAsync(delay, cancellationToken);
+
+                if (reloadRequested)
+                {
+                    await ReloadAsync(cancellationToken);
+                }
             }
         }
-        // ReSharper disable once FunctionNeverReturns
+        finally
+        {
+            logger.LogInformation("Stopped schedule polling for Schedulite runtime {InstanceId}.", instanceId);
+        }
     }
 
     /// <summary>Validates the requested job and queues a manual execution.</summary>
@@ -66,6 +84,12 @@ internal sealed class BackgroundJobScheduler(
         if (subjectId is not null)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(subjectId);
+        }
+
+        if (!jobRegistry.Contains(jobId))
+        {
+            logger.LogWarning("Rejected a manual trigger for unregistered job {JobId} in Schedulite runtime {InstanceId}.", jobId, instanceId);
+            throw new KeyNotFoundException($"Background job '{jobId}' is not registered for Schedulite runtime '{instanceId ?? "<default>"}'.");
         }
 
         var executionId = Guid.NewGuid();
@@ -78,6 +102,13 @@ internal sealed class BackgroundJobScheduler(
         );
 
         await executionQueue.EnqueueAsync(request, cancellationToken);
+        logger.LogInformation(
+            "Accepted manual execution {ExecutionId} for job {JobId} and subject {SubjectId} in Schedulite runtime {InstanceId}.",
+            executionId,
+            jobId,
+            subjectId,
+            instanceId
+        );
         return executionId;
     }
 
@@ -86,33 +117,44 @@ internal sealed class BackgroundJobScheduler(
     {
         cancellationToken.ThrowIfCancellationRequested();
         signal.Signal();
+        logger.LogInformation("Requested a schedule reload for Schedulite runtime {InstanceId}.", instanceId);
         return Task.CompletedTask;
     }
 
     /// <summary>Reloads configured schedules and calculates their next occurrences.</summary>
     private async Task ReloadAsync(CancellationToken cancellationToken)
     {
+        logger.LogDebug("Loading configured schedules for Schedulite runtime {InstanceId}.", instanceId);
         var configuredSchedules = await FromScheduleProvider(provider => provider.GetSchedulesAsync(cancellationToken));
         ArgumentNullException.ThrowIfNull(configuredSchedules);
 
         var now = timeProvider.GetUtcNow();
         var scheduleIds = new HashSet<string>(StringComparer.Ordinal);
         var refreshedSchedules = new Dictionary<string, ExecutionSchedule>(StringComparer.Ordinal);
-        foreach (var schedule in configuredSchedules.Where(x => x.Enabled))
+        var disabledScheduleCount = 0;
+        var schedulesWithoutNextOccurrence = 0;
+        foreach (var schedule in configuredSchedules)
         {
             cancellationToken.ThrowIfCancellationRequested();
             ArgumentNullException.ThrowIfNull(schedule);
             ArgumentException.ThrowIfNullOrWhiteSpace(schedule.ScheduleId);
+            if (!scheduleIds.Add(schedule.ScheduleId))
+            {
+                throw new InvalidOperationException($"Duplicate background job schedule ID '{schedule.ScheduleId}'.");
+            }
+
+            if (!schedule.Enabled)
+            {
+                disabledScheduleCount++;
+                logger.LogTrace("Ignoring disabled schedule {ScheduleId} in Schedulite runtime {InstanceId}.", schedule.ScheduleId, instanceId);
+                continue;
+            }
+
             ArgumentException.ThrowIfNullOrWhiteSpace(schedule.JobId);
             ArgumentException.ThrowIfNullOrWhiteSpace(schedule.ScheduleRule);
             if (schedule.SubjectId is not null)
             {
                 ArgumentException.ThrowIfNullOrWhiteSpace(schedule.SubjectId);
-            }
-
-            if (!scheduleIds.Add(schedule.ScheduleId))
-            {
-                throw new InvalidOperationException($"Duplicate background job schedule ID '{schedule.ScheduleId}'.");
             }
 
             DateTimeOffset? nextExecution;
@@ -126,11 +168,24 @@ internal sealed class BackgroundJobScheduler(
             }
             if (nextExecution is null)
             {
+                schedulesWithoutNextOccurrence++;
+                logger.LogDebug(
+                    "Schedule {ScheduleId} has no future occurrence and will not be queued in Schedulite runtime {InstanceId}.",
+                    schedule.ScheduleId,
+                    instanceId
+                );
                 continue;
             }
 
             var runtimeSchedule = new ExecutionSchedule(schedule, nextExecution.Value);
             refreshedSchedules.Add(schedule.ScheduleId, runtimeSchedule);
+            logger.LogTrace(
+                "Loaded schedule {ScheduleId} for job {JobId}; its next execution is {NextExecutionUtc} in Schedulite runtime {InstanceId}.",
+                schedule.ScheduleId,
+                schedule.JobId,
+                nextExecution,
+                instanceId
+            );
         }
 
         _schedules.Clear();
@@ -139,6 +194,14 @@ internal sealed class BackgroundJobScheduler(
             cancellationToken.ThrowIfCancellationRequested();
             _schedules.Add(scheduleId, runtimeSchedule);
         }
+
+        logger.LogInformation(
+            "Reloaded schedules for Schedulite runtime {InstanceId}: {ScheduledScheduleCount} scheduled, {DisabledScheduleCount} disabled, {WithoutNextOccurrenceCount} enabled without a future occurrence.",
+            instanceId,
+            refreshedSchedules.Count,
+            disabledScheduleCount,
+            schedulesWithoutNextOccurrence
+        );
     }
 
     /// <summary>Queues each due schedule and advances it to its next occurrence.</summary>
@@ -209,6 +272,12 @@ internal sealed class BackgroundJobScheduler(
             {
                 // A long outage can leave a high-frequency schedule millions of occurrences behind.
                 // Ask the provider to jump to the first occurrence after now instead of walking all of them.
+                logger.LogWarning(
+                    "Schedule {ScheduleId} in Schedulite runtime {InstanceId} has more than {MaximumMissedOccurrences} missed occurrences; asking the provider to fast-forward.",
+                    executionSchedule.Schedule.ScheduleId,
+                    instanceId,
+                    MaximumMissedOccurrencesToWalk
+                );
                 nextExecution = await FromScheduleProvider(provider => provider.GetNextExecution(executionSchedule.Schedule.ScheduleRule, now));
                 if (nextExecution is null)
                 {

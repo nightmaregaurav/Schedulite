@@ -6,21 +6,21 @@ namespace Schedulite.Example.Features.BackgroundJobManagement;
 [ApiController]
 [Route("api/background-jobs")]
 public sealed class BackgroundJobManagementController(
-    IBackgroundJobScheduler scheduler,
-    IBackgroundJobScheduleProvider scheduleProvider,
+    [FromKeyedServices(null)] IBackgroundJobScheduler scheduler,
+    [FromKeyedServices(null)] IBackgroundJobScheduleProvider scheduleProvider,
     TimeProvider timeProvider) : ControllerBase
 {
     [HttpGet("")]
     [ProducesResponseType<IEnumerable<BackgroundJobModel>>(StatusCodes.Status200OK)]
-    public async Task<IActionResult> ListServices(CancellationToken cancellationToken)
+    public async Task<IActionResult> ListSchedules(CancellationToken cancellationToken)
     {
         var schedules = await scheduleProvider.GetSchedulesAsync(cancellationToken);
         var now = timeProvider.GetUtcNow();
-        var services = new List<BackgroundJobModel>();
+        var models = new List<BackgroundJobModel>();
 
         foreach (var schedule in schedules)
         {
-            services.Add(new BackgroundJobModel
+            models.Add(new BackgroundJobModel
             {
                 ScheduleId = schedule.ScheduleId,
                 JobId = schedule.JobId,
@@ -31,22 +31,38 @@ public sealed class BackgroundJobManagementController(
             });
         }
 
-        return Ok(services);
+        return Ok(models);
     }
 
-    [HttpPost("trigger/{serviceId}")]
+    [HttpPost("trigger/{jobId}")]
     [ProducesResponseType<Guid>(StatusCodes.Status202Accepted)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> TriggerService([FromRoute] string serviceId, CancellationToken cancellationToken)
+    public async Task<IActionResult> TriggerJob(
+        [FromRoute] string jobId,
+        [FromQuery] string? subjectId,
+        CancellationToken cancellationToken)
     {
         try
         {
-            var executionId = await scheduler.TriggerAsync(serviceId, "tenant-can-be-added-here", cancellationToken);
+            var executionId = await scheduler.TriggerAsync(jobId, subjectId, cancellationToken);
             return Accepted(executionId);
         }
         catch (KeyNotFoundException)
         {
             return NotFound();
         }
+        catch (ArgumentException)
+        {
+            return BadRequest();
+        }
+    }
+
+    [HttpPost("reload")]
+    [ProducesResponseType(StatusCodes.Status202Accepted)]
+    public async Task<IActionResult> ReloadSchedules(CancellationToken cancellationToken)
+    {
+        await scheduler.ReloadSchedulesAsync(cancellationToken);
+        return Accepted();
     }
 }

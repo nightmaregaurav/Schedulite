@@ -1,10 +1,12 @@
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using Schedulite.Abstractions;
 
 namespace Schedulite.Example.BackgroundJobs.Services;
 
-public sealed class SkellyJob(TimeProvider timeProvider) : IBackgroundJob
+public sealed class SkellyJob(TimeProvider timeProvider, ILogger<SkellyJob> logger) : IBackgroundJob
 {
+    public ExecutionConcurrencyScope ConcurrencyScope => ExecutionConcurrencyScope.PerSubject;
     public string JobName => "Skelly Printer";
     public string JobDescription => "Draws a skeleton, waits for 10 seconds to simulate work, then says bye.";
 
@@ -40,7 +42,8 @@ $"""
 {timeProvider.GetUtcNow():O}] Hi from the {nameof(SkellyJob)} background job! context: {JsonSerializer.Serialize(context, new JsonSerializerOptions { WriteIndented = true })}
 """
         );
+        logger.LogInformation("Printed the skeleton for subject {SubjectId} in execution {ExecutionId}.", context.SubjectId, context.ExecutionId);
         await Task.Delay(TimeSpan.FromSeconds(10), cancellationToken);
-        Console.WriteLine($"[{timeProvider.GetUtcNow():O}] Bye from the {nameof(SkellyJob)} background job.");
+        logger.LogInformation("Finished the skeleton job for subject {SubjectId} in execution {ExecutionId}.", context.SubjectId, context.ExecutionId);
     }
 }
