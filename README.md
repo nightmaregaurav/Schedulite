@@ -186,7 +186,7 @@ public sealed class MyScheduleProvider : IBackgroundJobScheduleProvider
 }
 ```
 
-The schedule provider is reloaded when the hosted scheduler starts and when it is signalled by the scheduler runtime. A schedule that returns `null` from `GetNextExecution` is not scheduled. Disabled schedules are ignored.
+The schedule provider is reloaded when the hosted scheduler starts and when it is signalled by the scheduler runtime. A schedule that returns `null` from `GetNextExecution` is not scheduled. If the provider returns the currently queued timestamp again when asked for the occurrence after it, Schedulite treats the schedule as one-time, executes that occurrence once, logs this, and removes the schedule from its active queue. The provider remains responsible for deciding which occurrences are available across launches or application instances. Disabled schedules are ignored.
 
 Schedulite resolves the provider in an asynchronous dependency injection scope for each provider call. This lets providers use scoped services such as database contexts; provider instance fields should not be used to carry state from one call to another. `GetNextExecution` has no cancellation token, so keep that calculation bounded. The scheduler retains every enabled schedule in memory and scans them in-process, so it is intended for moderate schedule sets rather than millions of schedule rows.
 

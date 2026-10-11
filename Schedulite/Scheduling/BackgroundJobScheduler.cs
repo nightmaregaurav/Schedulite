@@ -259,7 +259,7 @@ internal sealed class BackgroundJobScheduler(
     }
 
     /// <summary>Advances a schedule past its current occurrence and skips missed occurrences.</summary>
-    /// <returns>True if the schedule has no more occurrences; otherwise, false.</returns>
+    /// <returns>True if the schedule has another occurrence; otherwise, false.</returns>
     private async Task<bool> AdvanceSchedule(ExecutionSchedule executionSchedule, DateTimeOffset now, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -270,7 +270,13 @@ internal sealed class BackgroundJobScheduler(
             return false;
         }
 
-        if (nextExecution <= executionSchedule.NextExecution)
+        if (nextExecution == executionSchedule.NextExecution)
+        {
+            LogOneTimeSchedule(executionSchedule, nextExecution.Value);
+            return false;
+        }
+
+        if (nextExecution < executionSchedule.NextExecution)
         {
             throw new InvalidOperationException($"Schedule calculator produced an occurrence that does not advance schedule '{executionSchedule.Schedule.ScheduleId}'.");
         }
@@ -313,7 +319,13 @@ internal sealed class BackgroundJobScheduler(
                 return false;
             }
 
-            if (nextExecution <= executionSchedule.NextExecution)
+            if (nextExecution == executionSchedule.NextExecution)
+            {
+                LogOneTimeSchedule(executionSchedule, nextExecution.Value);
+                return false;
+            }
+
+            if (nextExecution < executionSchedule.NextExecution)
             {
                 throw new InvalidOperationException($"Schedule calculator produced an occurrence that does not advance schedule '{executionSchedule.Schedule.ScheduleId}'.");
             }
@@ -322,6 +334,17 @@ internal sealed class BackgroundJobScheduler(
         }
 
         return true;
+    }
+
+    /// <summary>Logs that a schedule provider returned its current occurrence again, marking the schedule as one-time.</summary>
+    private void LogOneTimeSchedule(ExecutionSchedule executionSchedule, DateTimeOffset executionTime)
+    {
+        logger.LogInformation(
+            "Schedule {ScheduleId} returned its current execution time {ExecutionTimeUtc}; treating it as a one-time schedule and removing it from the schedule queue in Schedulite runtime {InstanceId}.",
+            executionSchedule.Schedule.ScheduleId,
+            executionTime,
+            instanceId
+        );
     }
 
     /// <summary>Returns the earliest next occurrence among active schedules.</summary>

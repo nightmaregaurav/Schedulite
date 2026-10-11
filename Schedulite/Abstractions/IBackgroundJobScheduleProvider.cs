@@ -17,6 +17,12 @@ public interface IBackgroundJobScheduleProvider
     /// <param name="now">The reference time from which to calculate the next occurrence.</param>
     /// <returns>A task containing the next occurrence, or <see langword="null"/> when the rule has no future occurrence.</returns>
     /// <exception cref="ArgumentException">The rule is invalid or unsupported.</exception>
-    /// <remarks>This method has no cancellation token, so calculations should complete promptly.</remarks>
+    /// <remarks>
+    /// This method has no cancellation token, so calculations should complete promptly. When Schedulite asks for the
+    /// occurrence after the currently queued one, returning that same timestamp identifies a one-time schedule:
+    /// Schedulite executes the queued occurrence once, logs the one-time schedule, and removes it from the active queue.
+    /// The provider remains responsible for deciding which schedules and occurrences are available across launches or
+    /// application instances.
+    /// </remarks>
     public Task<DateTimeOffset?> GetNextExecution(string scheduleRule, DateTimeOffset now);
 }

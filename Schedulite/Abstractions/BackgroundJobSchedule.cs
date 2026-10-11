@@ -1,6 +1,6 @@
 namespace Schedulite.Abstractions;
 
-/// <summary>Describes a recurring background job schedule supplied by the application.</summary>
+/// <summary>Describes a background job schedule supplied by the application.</summary>
 public record BackgroundJobSchedule
 {
     /// <summary>Gets the stable, unique identifier of this schedule within its Schedulite runtime.</summary>
