@@ -119,7 +119,10 @@ public static class ServiceCollectionExtensions
         services.AddKeyedSingleton(instanceId, options);
 
         // Keep the runtime's registered IDs independently from job construction so manual triggers can be validated eagerly.
-        services.AddKeyedSingleton(instanceId, new BackgroundJobRegistry());
+        var jobRegistry = new BackgroundJobRegistry();
+        services.AddKeyedSingleton(instanceId, jobRegistry);
+        services.AddSingleton(new ScheduliteRuntimeRegistration(instanceId, jobRegistry));
+        services.TryAddSingleton<IScheduliteManager, ScheduliteManager>();
 
         // The clock is a shared application infrastructure.
         // This can be overridden by the application if desired,

@@ -1,7 +1,8 @@
-namespace Schedulite.Example.Features.BackgroundJobManagement;
+namespace Schedulite.Abstractions;
 
-public class BackgroundJobModel
+public class BackgroundJobInfoModel
 {
+    public required string? ScheduliteInstanceId { get; set; }
     public required string ScheduleId { get; set; }
     public required string JobId { get; set; }
     public required string? SubjectId { get; set; }

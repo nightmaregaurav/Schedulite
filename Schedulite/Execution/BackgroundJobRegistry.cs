@@ -5,6 +5,9 @@ internal sealed class BackgroundJobRegistry
 {
     private readonly HashSet<string> _jobIds = new(StringComparer.Ordinal);
 
+    /// <summary>Returns the job IDs registered for this runtime.</summary>
+    public IReadOnlyCollection<string> JobIds => _jobIds;
+
     /// <summary>Registers a job ID and rejects duplicates.</summary>
     public void Register(string jobId)
     {
